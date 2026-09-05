@@ -1,12 +1,8 @@
-"""LangGraph tools for enhanced language model capabilities.
+"""Tools used by the OpsMind investigation graph.
 
-This package contains custom tools that can be used with LangGraph to extend
-the capabilities of language models. Currently includes tools for web search
-and other external integrations.
+Incident-specific telemetry tools will be added in a later phase.
 """
 
 from langchain_core.tools.base import BaseTool
 
-from .duckduckgo_search import duckduckgo_search_tool
-
-tools: list[BaseTool] = [duckduckgo_search_tool]
+tools: list[BaseTool] = []
