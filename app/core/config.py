@@ -148,8 +148,15 @@ class Settings:
         self.LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
         # LangGraph Configuration
+        # LangGraph Configuration
+        # GROQ_API_KEY is the $0 default LLM provider (free tier, no credit
+        # card required - see console.groq.com). OPENAI_API_KEY is optional:
+        # if left empty (the default), no OpenAI models are added to
+        # LLMRegistry at all, so a fresh checkout never accidentally needs a
+        # paid API key just to run the investigation graph.
+        self.GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "gpt-5-mini")
+        self.DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL", "openai/gpt-oss-120b")
         self.DEFAULT_LLM_TEMPERATURE = float(os.getenv("DEFAULT_LLM_TEMPERATURE", "0.2"))
         self.MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))
         self.MAX_LLM_CALL_RETRIES = int(os.getenv("MAX_LLM_CALL_RETRIES", "3"))

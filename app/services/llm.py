@@ -1,4 +1,12 @@
-"""LLM service for managing LLM calls with retries and fallback mechanisms."""
+"""LLM service for managing LLM calls with retries and fallback mechanisms.
+
+Groq is the $0 default provider (free tier, no credit card required, but a
+free API key from console.groq.com/keys is required - Groq's client
+validates this eagerly, so a missing key fails fast with a clear message
+rather than a confusing error deep in the SDK). OpenAI models are only
+added to the registry if OPENAI_API_KEY is explicitly set, so a fresh
+checkout never silently depends on a paid API.
+"""
 
 from typing import (
     Any,
@@ -7,15 +15,12 @@ from typing import (
     Optional,
 )
 
+import groq
+import openai
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
+from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
-from openai import (
-    APIError,
-    APITimeoutError,
-    OpenAIError,
-    RateLimitError,
-)
 from tenacity import (
     before_sleep_log,
     retry,
@@ -30,6 +35,104 @@ from app.core.config import (
 )
 from app.core.logging import logger
 
+# Transient errors worth retrying the same model for, across both providers.
+RETRYABLE_ERRORS = (
+    openai.RateLimitError,
+    openai.APITimeoutError,
+    openai.APIError,
+    groq.RateLimitError,
+    groq.APITimeoutError,
+    groq.APIError,
+)
+
+# Broader provider-level errors that mean "this model/provider failed,
+# move to the next one in the fallback chain" rather than "retry the same
+# call". Both openai.OpenAIError and groq.GroqError are the root exception
+# type each SDK raises for anything going wrong with a request.
+PROVIDER_ERRORS = (openai.OpenAIError, groq.GroqError)
+
+
+def _build_llm_registry() -> List[Dict[str, Any]]:
+    """Build the list of available LLM models based on which API keys are configured.
+
+    Groq models are always included - they are the $0 default. Groq's
+    client validates its API key eagerly at construction time (unlike
+    OpenAI's, which only fails on the actual call), so a missing
+    GROQ_API_KEY is rejected here with a clear, actionable message rather
+    than letting a confusing error surface from deep inside the groq SDK.
+    Note this is a free signup requirement, not a paid one - see
+    console.groq.com/keys, no credit card required.
+
+    OpenAI models are included only if settings.OPENAI_API_KEY is
+    non-empty, so an unconfigured OPENAI_API_KEY never silently becomes a
+    required paid dependency.
+
+    Returns:
+        List[Dict[str, Any]]: Registry entries, each with a "name" and a
+        pre-initialized "llm" instance.
+
+    Raises:
+        RuntimeError: If GROQ_API_KEY is not set.
+    """
+    if not settings.GROQ_API_KEY:
+        raise RuntimeError(
+            "GROQ_API_KEY is not set. OpsMind's $0 default LLM provider is "
+            "Groq's free tier - get a free API key (no credit card required) "
+            "at https://console.groq.com/keys and set GROQ_API_KEY in your "
+            ".env file."
+        )
+
+    registry: List[Dict[str, Any]] = [
+        {
+            "name": "openai/gpt-oss-120b",
+            "llm": ChatGroq(
+                model="openai/gpt-oss-120b",
+                api_key=settings.GROQ_API_KEY,
+                temperature=settings.DEFAULT_LLM_TEMPERATURE,
+                max_tokens=settings.MAX_TOKENS,
+            ),
+        },
+        {
+            "name": "openai/gpt-oss-20b",
+            "llm": ChatGroq(
+                model="openai/gpt-oss-20b",
+                api_key=settings.GROQ_API_KEY,
+                temperature=settings.DEFAULT_LLM_TEMPERATURE,
+                max_tokens=settings.MAX_TOKENS,
+            ),
+        },
+    ]
+
+    if settings.OPENAI_API_KEY:
+        registry.extend(
+            [
+                {
+                    "name": "gpt-5-mini",
+                    "llm": ChatOpenAI(
+                        model="gpt-5-mini",
+                        api_key=settings.OPENAI_API_KEY,
+                        max_tokens=settings.MAX_TOKENS,
+                        reasoning={"effort": "low"},
+                    ),
+                },
+                {
+                    "name": "gpt-4o-mini",
+                    "llm": ChatOpenAI(
+                        model="gpt-4o-mini",
+                        temperature=settings.DEFAULT_LLM_TEMPERATURE,
+                        api_key=settings.OPENAI_API_KEY,
+                        max_tokens=settings.MAX_TOKENS,
+                        top_p=0.9 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.8,
+                    ),
+                },
+            ]
+        )
+        logger.info("openai_models_added_to_registry", reason="OPENAI_API_KEY is set")
+    else:
+        logger.info("openai_models_skipped", reason="OPENAI_API_KEY is not set - $0 default, Groq only")
+
+    return registry
+
 
 class LLMRegistry:
     """Registry of available LLM models with pre-initialized instances.
@@ -38,58 +141,7 @@ class LLMRegistry:
     methods to retrieve them by name with optional argument overrides.
     """
 
-    # Class-level variable containing all available LLM models
-    LLMS: List[Dict[str, Any]] = [
-        {
-            "name": "gpt-5-mini",
-            "llm": ChatOpenAI(
-                model="gpt-5-mini",
-                api_key=settings.OPENAI_API_KEY,
-                max_tokens=settings.MAX_TOKENS,
-                reasoning={"effort": "low"},
-            ),
-        },
-        {
-            "name": "gpt-5",
-            "llm": ChatOpenAI(
-                model="gpt-5",
-                api_key=settings.OPENAI_API_KEY,
-                max_tokens=settings.MAX_TOKENS,
-                reasoning={"effort": "medium"},
-            ),
-        },
-        {
-            "name": "gpt-5-nano",
-            "llm": ChatOpenAI(
-                model="gpt-5-nano",
-                api_key=settings.OPENAI_API_KEY,
-                max_tokens=settings.MAX_TOKENS,
-                reasoning={"effort": "minimal"},
-            ),
-        },
-        {
-            "name": "gpt-4o",
-            "llm": ChatOpenAI(
-                model="gpt-4o",
-                temperature=settings.DEFAULT_LLM_TEMPERATURE,
-                api_key=settings.OPENAI_API_KEY,
-                max_tokens=settings.MAX_TOKENS,
-                top_p=0.95 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.8,
-                presence_penalty=0.1 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.0,
-                frequency_penalty=0.1 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.0,
-            ),
-        },
-        {
-            "name": "gpt-4o-mini",
-            "llm": ChatOpenAI(
-                model="gpt-4o-mini",
-                temperature=settings.DEFAULT_LLM_TEMPERATURE,
-                api_key=settings.OPENAI_API_KEY,
-                max_tokens=settings.MAX_TOKENS,
-                top_p=0.9 if settings.ENVIRONMENT == Environment.PRODUCTION else 0.8,
-            ),
-        },
-    ]
+    LLMS: List[Dict[str, Any]] = _build_llm_registry()
 
     @classmethod
     def get(cls, model_name: str, **kwargs) -> BaseChatModel:
@@ -105,7 +157,6 @@ class LLMRegistry:
         Raises:
             ValueError: If model_name is not found in LLMS
         """
-        # Find the model in the registry
         model_entry = None
         for entry in cls.LLMS:
             if entry["name"] == model_name:
@@ -118,12 +169,13 @@ class LLMRegistry:
                 f"model '{model_name}' not found in registry. available models: {', '.join(available_models)}"
             )
 
-        # If user provides kwargs, create a new instance with those args
         if kwargs:
             logger.debug("creating_llm_with_custom_args", model_name=model_name, custom_args=list(kwargs.keys()))
-            return ChatOpenAI(model=model_name, api_key=settings.OPENAI_API_KEY, **kwargs)
+            is_openai_model = model_name.startswith("gpt-")
+            if is_openai_model:
+                return ChatOpenAI(model=model_name, api_key=settings.OPENAI_API_KEY, **kwargs)
+            return ChatGroq(model=model_name, api_key=settings.GROQ_API_KEY, **kwargs)
 
-        # Return the default instance
         logger.debug("using_default_llm_instance", model_name=model_name)
         return model_entry["llm"]
 
@@ -155,7 +207,9 @@ class LLMService:
     """Service for managing LLM calls with retries and circular fallback.
 
     This service handles all LLM interactions with automatic retry logic,
-    rate limit handling, and circular fallback through all available models.
+    rate limit handling, and circular fallback through all available models
+    across both Groq (the $0 default) and OpenAI (only present if
+    configured).
     """
 
     def __init__(self):
@@ -163,7 +217,6 @@ class LLMService:
         self._llm: Optional[BaseChatModel] = None
         self._current_model_index: int = 0
 
-        # Find index of default model in registry
         all_names = LLMRegistry.get_all_names()
         try:
             self._current_model_index = all_names.index(settings.DEFAULT_LLM_MODEL)
@@ -176,7 +229,6 @@ class LLMService:
                 environment=settings.ENVIRONMENT.value,
             )
         except (ValueError, Exception) as e:
-            # Default model not found, use first model
             self._current_model_index = 0
             self._llm = LLMRegistry.LLMS[0]["llm"]
             logger.warning(
@@ -225,7 +277,7 @@ class LLMService:
     @retry(
         stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIError)),
+        retry=retry_if_exception_type(RETRYABLE_ERRORS),
         before_sleep=before_sleep_log(logger, "WARNING"),
         reraise=True,
     )
@@ -239,7 +291,7 @@ class LLMService:
             BaseMessage response from the LLM
 
         Raises:
-            OpenAIError: If all retries fail
+            PROVIDER_ERRORS: If all retries fail
         """
         if not self._llm:
             raise RuntimeError("llm not initialized")
@@ -248,7 +300,7 @@ class LLMService:
             response = await self._llm.ainvoke(messages)
             logger.debug("llm_call_successful", message_count=len(messages))
             return response
-        except (RateLimitError, APITimeoutError, APIError) as e:
+        except RETRYABLE_ERRORS as e:
             logger.warning(
                 "llm_call_failed_retrying",
                 error_type=type(e).__name__,
@@ -256,7 +308,7 @@ class LLMService:
                 exc_info=True,
             )
             raise
-        except OpenAIError as e:
+        except PROVIDER_ERRORS as e:
             logger.error(
                 "llm_call_failed",
                 error_type=type(e).__name__,
@@ -283,22 +335,19 @@ class LLMService:
         Raises:
             RuntimeError: If all models fail after retries
         """
-        # If user specifies a model, get it from registry
         if model_name:
             try:
                 self._llm = LLMRegistry.get(model_name, **model_kwargs)
-                # Update index to match the requested model
                 all_names = LLMRegistry.get_all_names()
                 try:
                     self._current_model_index = all_names.index(model_name)
                 except ValueError:
-                    pass  # Keep current index if model name not in list
+                    pass
                 logger.info("using_requested_model", model_name=model_name, has_custom_kwargs=bool(model_kwargs))
             except ValueError as e:
                 logger.error("requested_model_not_found", model_name=model_name, error=str(e))
                 raise
 
-        # Track which models we've tried to prevent infinite loops
         total_models = len(LLMRegistry.LLMS)
         models_tried = 0
         starting_index = self._current_model_index
@@ -308,7 +357,7 @@ class LLMService:
             try:
                 response = await self._call_llm_with_retry(messages)
                 return response
-            except OpenAIError as e:
+            except PROVIDER_ERRORS as e:
                 last_error = e
                 models_tried += 1
 
@@ -321,7 +370,6 @@ class LLMService:
                     error=str(e),
                 )
 
-                # If we've tried all models, give up
                 if models_tried >= total_models:
                     logger.error(
                         "all_models_failed",
@@ -330,14 +378,10 @@ class LLMService:
                     )
                     break
 
-                # Switch to next model in circular fashion
                 if not self._switch_to_next_model():
                     logger.error("failed_to_switch_to_next_model")
                     break
 
-                # Continue loop to try next model
-
-        # All models failed
         raise RuntimeError(
             f"failed to get response from llm after trying {models_tried} models. last error: {str(last_error)}"
         )
