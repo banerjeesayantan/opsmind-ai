@@ -13,7 +13,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.models.incident_enums import Severity
+from app.models.incident_enums import RemediationActionType, Severity
 from app.telemetry.schemas import EvidenceBundle, TimeWindow
 
 
@@ -109,6 +109,31 @@ class DiagnosisResult(BaseModel):
     impact: Optional[ImpactAssessment] = None
 
 
+class RemediationCandidate(BaseModel):
+    """A recommended corrective action produced by the remediation planner.
+
+    Deliberately the plain (action_type, parameters, rationale) shape
+    that app.services.persistence.persist_remediation and
+    app.investigation.risk.classify_risk both expect as plain arguments -
+    those modules were built decoupled from this schema by design (see
+    risk.py's own docstring), so this shape is the actual integration
+    contract, not an implementation detail.
+
+    Attributes:
+        action_type: Which controlled action is being recommended - one
+            of the fixed RemediationActionType values, never free-form.
+        parameters: The parameters for this action, already validated
+            against the chosen action's expected schema and checked to
+            reference only real, observed entities (e.g. a real
+            deployment_id actually seen in evidence, not one invented).
+        rationale: Why this action was recommended, in plain language.
+    """
+
+    action_type: RemediationActionType
+    parameters: dict = Field(default_factory=dict)
+    rationale: str = ""
+
+
 class InvestigationState(BaseModel):
     """State definition for the incident investigation LangGraph.
 
@@ -134,6 +159,10 @@ class InvestigationState(BaseModel):
         diagnosis: The final diagnosis, once the graph has selected a
             validated hypothesis as the working root cause. None until
             the graph reaches that point.
+        remediation: The recommended remediation action, once the
+            remediation_planner node has run. None if no diagnosis was
+            reached, or if the LLM's proposal failed schema/grounding
+            validation.
     """
 
     incident_id: str
@@ -146,3 +175,11 @@ class InvestigationState(BaseModel):
     validated_hypotheses: list[HypothesisCandidate] = Field(default_factory=list)
     impact: Optional[ImpactAssessment] = None
     diagnosis: Optional[DiagnosisResult] = None
+    remediation: Optional[RemediationCandidate] = None
+
+
+
+
+
+
+    

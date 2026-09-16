@@ -1,0 +1,73 @@
+name: Tests
+
+# Minimal CI: install Poetry, apply migrations against a real Postgres
+# service, run the full test suite. Every step here was validated
+# locally against a genuinely fresh Postgres instance with no .env file
+# present - only the environment variables set below - to confirm this
+# sequence works exactly as written before landing it.
+#
+# A real Postgres service is required (not just the test suite's own
+# SQLite fallback) because app.services.database.DatabaseService - the
+# production DB singleton - connects eagerly at import time and raises
+# outside of a PRODUCTION environment if that connection fails. The
+# `opsmind_test` database is intentionally NOT created here: its absence
+# is exactly what exercises tests/conftest.py's automatic fallback to a
+# temp file-backed SQLite database for persistence/API tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: opsmind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: opsmind
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Placeholder only - required for app.services.llm.LLMRegistry to
+      # initialize at import time, but no test in this suite makes a real
+      # Groq API call (the investigation graph's LLM calls are faked in
+      # tests/test_api_incidents.py, matching the $0/no-real-external-call
+      # convention used for every LLM-calling node's own tests).
+      GROQ_API_KEY: gsk_ci_placeholder_key_0000000000000000000000
+      JWT_SECRET_KEY: ci-placeholder-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Run database migrations
+        run: poetry run alembic upgrade head
+
+      - name: Run tests
+        run: poetry run pytest tests/ -v

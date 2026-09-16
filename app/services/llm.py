@@ -17,6 +17,7 @@ from typing import (
 
 import groq
 import openai
+import logging
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_groq import ChatGroq
@@ -278,7 +279,7 @@ class LLMService:
         stop=stop_after_attempt(settings.MAX_LLM_CALL_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(RETRYABLE_ERRORS),
-        before_sleep=before_sleep_log(logger, "WARNING"),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,
     )
     async def _call_llm_with_retry(self, messages: List[BaseMessage]) -> BaseMessage:
