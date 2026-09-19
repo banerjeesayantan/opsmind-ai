@@ -68,7 +68,7 @@ LLM call at all.
 | Tool | Purpose |
 |---|---|
 | [Python 3.13+](https://www.python.org/downloads/) | Runtime |
-| [uv](https://docs.astral.sh/uv/) | Dependency management (`pip install uv`) |
+| [Poetry](https://python-poetry.org/docs/#installation) | Dependency management |
 | [PostgreSQL 16](https://www.postgresql.org/) | Primary data store - via Docker (`docker-compose up -d db`) or a local install |
 | A free [Groq API key](https://console.groq.com/keys) | $0 default LLM provider - no credit card required |
 
@@ -92,7 +92,7 @@ cp .env.example .env
 ### 2. Install dependencies
 
 ```bash
-uv sync
+poetry install
 ```
 
 ### 3. Start PostgreSQL and run migrations
@@ -107,29 +107,29 @@ docker-compose up -d db
 instance. Either way, then apply migrations:
 
 ```bash
-uv run alembic upgrade head
+poetry run alembic upgrade head
 ```
 
 ### 4. Run the tests
 
 ```bash
-uv run pytest tests/ -v
+poetry run pytest tests/ -v
 ```
 
 Persistence-layer tests use a dedicated `opsmind_test` database
 (`OPSMIND_TEST_DATABASE_URL`, default
 `postgresql+psycopg2://postgres:postgres@localhost:5432/opsmind_test`) so
-they never touch your main `opsmind` data, and fall back automatically to an
-in-memory SQLite engine if that database isn't reachable - so the suite
-still runs even without a dedicated test database, though real Postgres is
-the intended path. Every persistence and API test exercises real SQL
+they never touch your main `opsmind` data, and fall back automatically to a
+temporary file-backed SQLite database if that database isn't reachable - so
+the suite still runs even without a dedicated test database, though real
+Postgres is the intended path. Every persistence and API test exercises real SQL
 against a real relational database - nothing about the persistence layer
 itself is mocked.
 
 ### 5. Run the application
 
 ```bash
-uv run uvicorn app.main:app --reload
+poetry run uvicorn app.main:app --reload
 ```
 
 Interactive API docs (Swagger UI) - **the intended demo UI, no separate
@@ -165,6 +165,9 @@ from Swagger:
    remediations, approvals, executions, verifications.
 8. **`GET /incidents/{id}/timeline`** - the append-only chronological record
    of everything that happened.
+9. **`GET /incidents/{id}/evidence`** - the raw observed evidence (logs,
+   metrics, deployments) the investigation collected, independent of any
+   hypothesis or diagnosis built from it.
 
 See [docs/incident-flow.md](docs/incident-flow.md) for the full pipeline
 walkthrough, including the deterministic risk rules and recovery criteria.
@@ -230,4 +233,4 @@ These hold across the whole codebase, not just one phase:
 - **[PostgreSQL](https://www.postgresql.org/)** - Primary data store
 - **[Groq](https://groq.com/)** - $0 default LLM provider (OpenAI optional)
 - **[Prometheus](https://prometheus.io/) / [Grafana](https://grafana.com/)** - Metrics and dashboards
-- **[uv](https://docs.astral.sh/uv/)** - Python dependency management
+- **[Poetry](https://python-poetry.org/)** - Python dependency management

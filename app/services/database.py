@@ -6,19 +6,14 @@ from typing import (
 )
 
 from fastapi import HTTPException
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 from sqlmodel import (
     Session,
-    SQLModel,
     create_engine,
     select,
 )
 
-from app.core.config import (
-    Environment,
-    settings,
-)
+from app.core.config import settings
 from app.core.logging import logger
 from app.models.session import Session as ChatSession
 from app.models.user import User
@@ -32,42 +27,49 @@ class DatabaseService:
     """
 
     def __init__(self):
-        """Initialize database service with connection pool."""
-        try:
-            # Configure environment-specific database connection pool settings
-            pool_size = settings.POSTGRES_POOL_SIZE
-            max_overflow = settings.POSTGRES_MAX_OVERFLOW
+        """Initialize the database engine.
 
-            # Create engine with appropriate pool configuration
-            connection_url = (
-                f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
-                f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
-            )
+        Deliberately lazy: create_engine() does not open a connection by
+        itself, so constructing this service performs no network I/O.
+        Schema is managed by Alembic migrations (see migrations/), not
+        here - this used to also call
+        SQLModel.metadata.create_all(self.engine) eagerly, which forced a
+        real round-trip to Postgres at construction time. Since
+        app.services.__init__ imports database_service eagerly, that
+        meant importing *any* app module - including ones that never
+        touch the database, like a pure-function test module - required
+        a live, correctly-authenticated Postgres connection just to load,
+        and failed at import/collection time instead of at actual first
+        use if Postgres was unreachable. Confirmed directly: this was the
+        root cause of several apparently-unrelated import failures during
+        development. The first real connection now happens on first
+        actual use (a Session is opened), which is where a "database
+        unreachable" error belongs.
+        """
+        pool_size = settings.POSTGRES_POOL_SIZE
+        max_overflow = settings.POSTGRES_MAX_OVERFLOW
 
-            self.engine = create_engine(
-                connection_url,
-                pool_pre_ping=True,
-                poolclass=QueuePool,
-                pool_size=pool_size,
-                max_overflow=max_overflow,
-                pool_timeout=30,  # Connection timeout (seconds)
-                pool_recycle=1800,  # Recycle connections after 30 minutes
-            )
+        connection_url = (
+            f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
+            f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+        )
 
-            # Create tables (only if they don't exist)
-            SQLModel.metadata.create_all(self.engine)
+        self.engine = create_engine(
+            connection_url,
+            pool_pre_ping=True,
+            poolclass=QueuePool,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=30,  # Connection timeout (seconds)
+            pool_recycle=1800,  # Recycle connections after 30 minutes
+        )
 
-            logger.info(
-                "database_initialized",
-                environment=settings.ENVIRONMENT.value,
-                pool_size=pool_size,
-                max_overflow=max_overflow,
-            )
-        except SQLAlchemyError as e:
-            logger.error("database_initialization_error", error=str(e), environment=settings.ENVIRONMENT.value)
-            # In production, don't raise - allow app to start even with DB issues
-            if settings.ENVIRONMENT != Environment.PRODUCTION:
-                raise
+        logger.info(
+            "database_initialized",
+            environment=settings.ENVIRONMENT.value,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+        )
 
     async def create_user(self, email: str, password: str) -> User:
         """Create a new user.

@@ -30,6 +30,7 @@ from app.schemas.incident import (
     ApprovalDecisionRequest,
     ApprovalResponse,
     DiagnosisResponse,
+    EvidenceResponse,
     HypothesisResponse,
     IncidentCreateRequest,
     IncidentResponse,
@@ -169,6 +170,25 @@ async def get_incident_timeline(
     return [TimelineEntryResponse(**event.model_dump()) for event in timeline]
 
 
+@router.get("/{incident_id}/evidence", response_model=list[EvidenceResponse])
+async def get_incident_evidence(
+    incident_id: str,
+    persistence: IncidentPersistenceService = Depends(get_persistence_service),
+) -> list[EvidenceResponse]:
+    """Get the raw evidence collected for an incident (logs, metrics, deployments).
+
+    What was actually observed, not an AI's interpretation of it - that
+    belongs to hypotheses and the diagnosis (see GET /incidents/{id}),
+    which reference this evidence rather than contain it.
+    """
+    incident = await persistence.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No incident found with id {incident_id!r}")
+
+    evidence = await persistence.list_evidence(incident_id)
+    return [EvidenceResponse(**item.model_dump()) for item in evidence]
+
+
 # -- Investigation -----------------------------------------------------------
 
 
@@ -288,6 +308,13 @@ async def recommend_remediation(
     incident = await persistence.get_incident(incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No incident found with id {incident_id!r}")
+
+    diagnosis = await persistence.get_diagnosis(body.diagnosis_id)
+    if diagnosis is None or diagnosis.incident_id != incident_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No diagnosis {body.diagnosis_id!r} found for incident {incident_id!r}",
+        )
 
     risk_level = classify_risk(body.action_type, body.parameters, environment=body.environment)
     remediation = await persistence.persist_remediation(

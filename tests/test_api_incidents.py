@@ -34,7 +34,7 @@ from app.investigation.schemas import (
     InvestigationState,
     RemediationCandidate,
 )
-from app.investigation.verification import VerificationService
+from app.investigation.verification import VerificationComparison, VerificationService
 from app.main import app
 from app.models.incident_enums import RemediationActionType, Severity
 from app.services.persistence import IncidentPersistenceService, incident_persistence_service
@@ -214,6 +214,22 @@ def test_get_incident_timeline_includes_creation_event(client):
     assert "incident_created" in event_types
 
 
+def test_get_incident_evidence_404_for_unknown_incident(client):
+    response = client.get("/api/v1/incidents/does-not-exist/evidence")
+    assert response.status_code == 404
+
+
+def test_get_incident_evidence_returns_persisted_evidence_after_investigate(client):
+    created = _create_incident(client)
+    _investigate(client, created["id"])
+
+    response = client.get(f"/api/v1/incidents/{created['id']}/evidence")
+    assert response.status_code == 200
+    evidence = response.json()
+    assert len(evidence) > 0
+    assert all("source" in item and "content" in item and "occurred_at" in item for item in evidence)
+
+
 # --- Investigation ------------------------------------------------------------
 
 
@@ -266,6 +282,49 @@ def test_recommend_remediation_classifies_risk_and_creates_approval(client):
     approvals = client.get(f"/api/v1/incidents/{created['id']}/approvals").json()
     assert len(approvals) == 1
     assert approvals[0]["status"] == "pending"
+
+
+def test_recommend_remediation_with_nonexistent_diagnosis_id_returns_404_not_500(client):
+    """Regression guard for A2: without validation, a bogus diagnosis_id
+    reaches persist_remediation() and raises a raw, unhandled
+    IntegrityError (a 500) against Postgres - confirmed by direct
+    reproduction against the real production database during the audit
+    that flagged this. The route must catch this before it ever reaches
+    persistence and return a clean 404 instead."""
+    created = _create_incident(client)
+    _investigate(client, created["id"])
+
+    response = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations",
+        json={
+            "diagnosis_id": 999999,
+            "action_type": "restart_service",
+            "parameters": {"service": "checkout", "instance_count": 1},
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_recommend_remediation_with_diagnosis_from_another_incident_returns_404(client):
+    """A diagnosis_id that exists but belongs to a different incident must
+    be rejected too - not just a bare existence check, an ownership
+    check. Otherwise a remediation could be attached to the wrong
+    incident's diagnosis entirely."""
+    incident_a = _create_incident(client)
+    investigation_a = _investigate(client, incident_a["id"])
+
+    incident_b = _create_incident(client)
+    _investigate(client, incident_b["id"])
+
+    response = client.post(
+        f"/api/v1/incidents/{incident_b['id']}/remediations",
+        json={
+            "diagnosis_id": investigation_a["diagnosis_id"],  # belongs to incident_a, not incident_b
+            "action_type": "restart_service",
+            "parameters": {"service": "checkout", "instance_count": 1},
+        },
+    )
+    assert response.status_code == 404
 
 
 def test_low_risk_remediation_is_auto_approved(client):
@@ -450,6 +509,70 @@ def test_investigate_persists_graph_remediation_and_feeds_existing_approval_flow
     assert len(full_final["approvals"]) == 1
     assert len(full_final["action_executions"]) == 1
     assert len(full_final["verifications"]) == 1
+
+
+class _AlwaysRecoveredVerificationService(VerificationService):
+    """Deterministically reports recovery, so the E2E test below can assert
+    the full terminal chain (...-> verify -> RESOLVED) without depending
+    on the real mock telemetry sources happening to show improvement for
+    this particular fake scenario - VerificationService.verify()'s actual
+    comparison logic is exercised for real elsewhere (tests/test_verification.py
+    and this file's test_full_pipeline_through_verification /
+    test_investigate_persists_graph_remediation_and_feeds_existing_approval_flow
+    above, both of which assert only recovered in (True, False) since either
+    outcome is a legitimate, real result there).
+    """
+
+    async def verify(self, service, before_evidence, after_window):
+        return VerificationComparison(
+            recovered=True,
+            before_avg_metric_value=2.6,
+            after_avg_metric_value=0.3,
+            before_error_log_count=2,
+            after_error_log_count=0,
+            notes="Deterministic fake: forced recovered=True for the full-lifecycle E2E test.",
+        )
+
+
+def test_full_lifecycle_reaches_resolved_status(client_with_remediation):
+    """One end-to-end regression test for the complete lifecycle the
+    audit specifically calls out:
+
+        create -> investigate -> remediate -> approve -> execute -> verify -> resolved
+
+    Deliberately not a new/duplicate happy-path test: it reuses the exact
+    same request sequence as
+    test_investigate_persists_graph_remediation_and_feeds_existing_approval_flow
+    above, adding only the one assertion that test intentionally leaves
+    open (the incident's final status), via a deterministic verification
+    override so that assertion doesn't depend on mock-telemetry chance.
+    """
+    client = client_with_remediation
+    app.dependency_overrides[get_verification_service] = lambda: _AlwaysRecoveredVerificationService()
+
+    created = _create_incident(client)
+    investigation = _investigate(client, created["id"])
+    assert investigation["remediation_id"] is not None
+
+    approvals = client.get(f"/api/v1/incidents/{created['id']}/approvals").json()
+    decision = client.post(
+        f"/api/v1/incidents/{created['id']}/approvals/{approvals[0]['id']}/decision",
+        json={"approved": True},
+    )
+    assert decision.status_code == 200
+
+    execution = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    ).json()
+
+    verification = client.post(
+        f"/api/v1/incidents/{created['id']}/executions/{execution['id']}/verify", json={}
+    ).json()
+    assert verification["recovered"] is True
+
+    final = client.get(f"/api/v1/incidents/{created['id']}").json()
+    assert final["incident"]["status"] == "resolved"
+    assert final["incident"]["resolved_at"] is not None
 
 
 def test_investigate_without_remediation_leaves_remediation_id_none(client):

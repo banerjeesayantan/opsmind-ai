@@ -400,6 +400,20 @@ class IncidentPersistenceService:
         with self._session() as session:
             return session.get(Remediation, remediation_id)
 
+    async def get_diagnosis(self, diagnosis_id: int) -> Optional[Diagnosis]:
+        """Fetch a single diagnosis by ID.
+
+        Used to validate a client-supplied diagnosis_id before it reaches
+        persist_remediation, which takes diagnosis_id as a plain int with
+        no existence/ownership check of its own (by design - it's a
+        low-level write primitive) - an unvalidated ID that doesn't
+        exist, or belongs to a different incident, would otherwise
+        surface as a raw NOT NULL/foreign-key database error instead of
+        a clean 404.
+        """
+        with self._session() as session:
+            return session.get(Diagnosis, diagnosis_id)
+
     async def create_approval_request(
         self,
         incident_id: str,

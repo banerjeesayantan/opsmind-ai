@@ -18,7 +18,7 @@ import os
 import tempfile
 
 import pytest
-from sqlalchemy import create_engine as _create_engine
+from sqlalchemy import create_engine as _create_engine, event
 from sqlmodel import SQLModel
 
 TEST_DATABASE_URL = os.getenv(
@@ -53,10 +53,24 @@ def _build_test_engine():
     except Exception:
         db_fd, db_path = tempfile.mkstemp(suffix=".sqlite3", prefix="opsmind_test_")
         os.close(db_fd)
-        return _create_engine(
+        engine = _create_engine(
             f"sqlite:///{db_path}",
             connect_args={"check_same_thread": False},
         )
+
+        # SQLite does not enforce foreign key constraints by default,
+        # unlike Postgres - without this, a bad foreign key (e.g. a
+        # Remediation pointed at a nonexistent diagnosis_id) would
+        # silently succeed on this fallback while genuinely raising an
+        # IntegrityError against the real Postgres path, making any test
+        # of that behavior backend-dependent/flaky.
+        @event.listens_for(engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection, _):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        return engine
 
 
 def _sqlite_file_path(engine) -> str | None:

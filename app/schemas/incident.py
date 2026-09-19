@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.models.incident_enums import (
     ApprovalStatus,
+    EvidenceSource,
     ExecutionStatus,
     HypothesisStatus,
     IncidentStatus,
@@ -75,6 +76,18 @@ class InvestigateResponse(BaseModel):
         "failed validation/grounding.",
     )
     risk_level: Optional[RiskLevel] = None
+
+
+class EvidenceResponse(BaseModel):
+    """A single piece of raw, observed evidence collected during investigation."""
+
+    id: int
+    source: EvidenceSource
+    source_reference: Optional[str] = None
+    content: str
+    raw_data: Optional[dict] = None
+    occurred_at: datetime
+    collected_at: datetime
 
 
 class HypothesisResponse(BaseModel):

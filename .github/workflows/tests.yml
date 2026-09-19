@@ -6,13 +6,15 @@ name: Tests
 # present - only the environment variables set below - to confirm this
 # sequence works exactly as written before landing it.
 #
-# A real Postgres service is required (not just the test suite's own
-# SQLite fallback) because app.services.database.DatabaseService - the
-# production DB singleton - connects eagerly at import time and raises
-# outside of a PRODUCTION environment if that connection fails. The
-# `opsmind_test` database is intentionally NOT created here: its absence
-# is exactly what exercises tests/conftest.py's automatic fallback to a
-# temp file-backed SQLite database for persistence/API tests.
+# A real Postgres service is used here to match the primary, intended
+# dev/production path end-to-end (migrations applied, real SQL executed)
+# rather than because it's strictly required to import the app -
+# app.services.database.DatabaseService no longer connects eagerly at
+# construction time (see the A3 fix), so importing the app succeeds even
+# without Postgres. The `opsmind_test` database is intentionally NOT
+# created here: its absence is exactly what exercises
+# tests/conftest.py's automatic fallback to a temp file-backed SQLite
+# database for persistence/API tests, so both paths get real coverage.
 
 on:
   push:

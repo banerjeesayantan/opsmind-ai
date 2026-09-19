@@ -28,6 +28,7 @@ import threading
 
 from sqlmodel import Session, SQLModel, select
 
+import app.models.database  # noqa: F401 - registers every table so create_all's schema has no dangling FKs
 from app.models.incident import Incident
 from tests.conftest import _build_test_engine, _sqlite_file_path
 
@@ -61,8 +62,16 @@ def _create_then_query_from_another_thread(engine) -> dict:
     """Reproduces exactly what TestClient's portal thread does to the test engine:
     schema + a row created on the calling (pytest) thread, then queried
     from a different thread.
+
+    Creates the full schema (not just the Incident table) because the
+    SQLite fallback enables PRAGMA foreign_keys=ON to match Postgres's
+    behavior (see tests/conftest.py) - Incident.created_by references
+    the user table, so creating only Incident's table would make even a
+    NULL-valued foreign key column fail to validate against a
+    nonexistent referenced table. This also better matches how the real
+    test_engine fixture always creates the schema.
     """
-    SQLModel.metadata.create_all(engine, tables=[Incident.__table__])
+    SQLModel.metadata.create_all(engine)
 
     with Session(engine) as session:
         session.add(Incident(title="created on the main thread"))
@@ -102,7 +111,7 @@ def test_table_created_on_one_thread_is_visible_from_another_thread():
         assert len(results["incidents"]) == 1
         assert results["incidents"][0].title == "created on the main thread"
     finally:
-        SQLModel.metadata.drop_all(engine, tables=[Incident.__table__])
+        SQLModel.metadata.drop_all(engine)
         engine.dispose()
         os.remove(db_path)
 
@@ -126,7 +135,7 @@ def test_build_test_engine_schema_is_visible_across_threads(monkeypatch):
         assert "error" not in results, f"Cross-thread query failed: {results.get('error')}"
         assert len(results["incidents"]) == 1
     finally:
-        SQLModel.metadata.drop_all(engine, tables=[Incident.__table__])
+        SQLModel.metadata.drop_all(engine)
         engine.dispose()
         path = _sqlite_file_path(engine)
         if path:

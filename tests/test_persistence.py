@@ -11,6 +11,8 @@ Run with: pytest tests/test_persistence.py -v
 import asyncio
 from datetime import datetime, timedelta, UTC
 
+import pytest
+
 from app.investigation.schemas import (
     DiagnosisResult,
     EvidenceCitation,
@@ -281,6 +283,46 @@ def test_persist_remediation_and_low_risk_auto_approves(test_engine):
         assert updated_incident.status == IncidentStatus.DIAGNOSED
 
     asyncio.run(run())
+
+
+def test_get_diagnosis_returns_the_persisted_row(test_engine):
+    service = IncidentPersistenceService(engine=test_engine)
+    incident, diagnosis_id = _diagnosed_incident(service)
+
+    async def run():
+        diagnosis = await service.get_diagnosis(diagnosis_id)
+        assert diagnosis is not None
+        assert diagnosis.id == diagnosis_id
+        assert diagnosis.incident_id == incident.id
+
+    asyncio.run(run())
+
+
+def test_get_diagnosis_returns_none_for_unknown_id(test_engine):
+    service = IncidentPersistenceService(engine=test_engine)
+    result = asyncio.run(service.get_diagnosis(999999))
+    assert result is None
+
+
+def test_persist_remediation_with_nonexistent_diagnosis_id_raises_at_the_db_layer(test_engine):
+    """Regression guard for A2: persist_remediation() itself has no
+    existence/ownership check on diagnosis_id (by design - it's a
+    low-level write primitive) - callers are responsible for validating
+    it first via get_diagnosis(). This documents that a raw, unvalidated
+    call still fails loudly (via the FK constraint) rather than silently
+    corrupting data, and is why app/api/v1/incidents.py's
+    recommend_remediation route validates with get_diagnosis() before
+    ever reaching this call."""
+    service = IncidentPersistenceService(engine=test_engine)
+
+    async def run():
+        incident = await service.create_incident(title="No diagnosis yet")
+        await service.persist_remediation(
+            incident.id, 999999, RemediationActionType.RESTART_SERVICE, {}, RiskLevel.LOW
+        )
+
+    with pytest.raises(Exception):
+        asyncio.run(run())
 
 
 def test_high_risk_remediation_requires_approval_and_blocks_incident(test_engine):
