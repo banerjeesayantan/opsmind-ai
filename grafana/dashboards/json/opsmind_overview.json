@@ -1,0 +1,166 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "opsmind-overview",
+    "title": "OpsMind Overview",
+    "description": "Incident investigation/response pipeline: HTTP traffic, investigation outcomes, remediation risk, approvals, action execution, and verification - sourced from app.core.metrics, scraped by the 'fastapi' Prometheus job.",
+    "tags": ["opsmind", "incidents"],
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "type": "graph",
+        "title": "HTTP Request Rate (by endpoint)",
+        "description": "http_requests_total - request throughput per endpoint, split by status.",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (endpoint, status)",
+            "legendFormat": "{{endpoint}} [{{status}}]",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "HTTP Request Duration (p95, by endpoint)",
+        "description": "http_request_duration_seconds - request latency.",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Investigations Completed (by outcome)",
+        "description": "opsmind_investigations_completed_total - how many investigations reached a diagnosis vs. stayed unresolved.",
+        "targets": [
+          {
+            "expr": "sum(opsmind_investigations_completed_total) by (outcome)",
+            "legendFormat": "{{outcome}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 0, "y": 9, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Diagnosis Confidence (p50 / p95)",
+        "description": "opsmind_diagnosis_confidence - confidence score distribution of reached diagnoses.",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(opsmind_diagnosis_confidence_bucket[15m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(opsmind_diagnosis_confidence_bucket[15m]))",
+            "legendFormat": "p95",
+            "refId": "B"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 12, "y": 9, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Remediations Recommended (by risk level)",
+        "description": "opsmind_remediations_by_risk_total - recommended remediations split by classified risk (low/medium/high) and action type.",
+        "targets": [
+          {
+            "expr": "sum(opsmind_remediations_by_risk_total) by (risk_level)",
+            "legendFormat": "{{risk_level}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 0, "y": 18, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Action Executions (by status)",
+        "description": "opsmind_action_executions_total - simulated remediation executions by outcome status.",
+        "targets": [
+          {
+            "expr": "sum(opsmind_action_executions_total) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 12, "y": 18, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Approvals (by status)",
+        "description": "opsmind_approvals_total - approval requests by resulting status (not_required/pending/approved/rejected).",
+        "targets": [
+          {
+            "expr": "sum(opsmind_approvals_total) by (status)",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 0, "y": 27, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Verifications (by recovery verdict)",
+        "description": "opsmind_verifications_total - post-action verification checks by whether the incident was judged recovered.",
+        "targets": [
+          {
+            "expr": "sum(opsmind_verifications_total) by (recovered)",
+            "legendFormat": "recovered={{recovered}}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 12, "y": 27, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Incident Time to Resolution (p50 / p95)",
+        "description": "opsmind_incident_time_to_resolution_seconds - wall-clock time from incident creation to RESOLVED.",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(opsmind_incident_time_to_resolution_seconds_bucket[30m]))",
+            "legendFormat": "p50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(opsmind_incident_time_to_resolution_seconds_bucket[30m]))",
+            "legendFormat": "p95",
+            "refId": "B"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 0, "y": 36, "w": 12, "h": 9 }
+      },
+      {
+        "type": "graph",
+        "title": "Active DB Connections",
+        "description": "db_connections - gauge of active database connections.",
+        "targets": [
+          {
+            "expr": "db_connections",
+            "legendFormat": "connections",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "gridPos": { "x": 12, "y": 36, "w": 12, "h": 9 }
+      }
+    ]
+  },
+  "overwrite": true
+}

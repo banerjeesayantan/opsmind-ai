@@ -1,0 +1,24 @@
+# Grafana datasource provisioning - makes the Prometheus datasource exist
+# automatically on container start, rather than requiring someone to add
+# it by hand through the Grafana UI. Without this file, the dashboards
+# in grafana/dashboards/json/ (which reference the datasource by name)
+# would load with "datasource not found" until a human manually created
+# one - not reproducible through docker-compose alone.
+#
+# Docs: https://grafana.com/docs/grafana/latest/administration/provisioning/#datasources
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    # "prometheus" here is the docker-compose service name for the
+    # Prometheus container - Grafana reaches it over the shared
+    # "monitoring" Docker network, not localhost.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
