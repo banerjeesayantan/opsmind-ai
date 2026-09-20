@@ -198,11 +198,16 @@ class RemediationCreateRequest(BaseModel):
 
 
 class ApprovalDecisionRequest(BaseModel):
-    """Request body for POST /incidents/{id}/approvals/{approval_id}/decision."""
+    """Request body for POST /incidents/{id}/approvals/{approval_id}/decision.
+
+    decided_by is deliberately not a field here: the deciding user is
+    always taken from the authenticated caller's JWT (see
+    app.api.v1.incidents.decide_approval), never accepted from the
+    client, so a caller can't attribute a decision to someone else.
+    """
 
     approved: bool
     reason: Optional[str] = None
-    decided_by: Optional[int] = None
 
 
 class VerifyRequest(BaseModel):

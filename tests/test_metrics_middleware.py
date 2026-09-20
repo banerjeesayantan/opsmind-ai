@@ -56,11 +56,19 @@ def test_request_through_nested_incidents_router_does_not_raise():
     /api/v1/incidents is served by incidents_router, included under
     api_router, included under app - the specific nesting shape that broke
     starlette_prometheus's route-path lookup.
+
+    Asserts 401, not 201: incident routes now require
+    Depends(get_current_user) (see app.api.v1.incidents), so an
+    unauthenticated request correctly gets rejected by auth rather than
+    reaching persistence - but the point of this regression guard is
+    just that the middleware itself doesn't raise AttributeError while
+    routing through the nested router, and a clean 401 is just as much
+    evidence of that as a 201 would be.
     """
     with TestClient(app) as client:
         response = client.post("/api/v1/incidents", json={"title": "Metrics regression check", "service": "checkout"})
 
-    assert response.status_code == 201
+    assert response.status_code == 401
 
 
 def test_request_through_nested_router_increments_http_requests_total_exactly_once():

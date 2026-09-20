@@ -19,12 +19,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from langgraph.graph.state import CompiledStateGraph
 
+from app.api.v1.auth import get_current_user
 from app.core.logging import logger
 from app.investigation.graph import build_investigation_graph
 from app.investigation.risk import classify_risk
 from app.investigation.schemas import InvestigationState
 from app.investigation.verification import VerificationService
 from app.models.incident_enums import ExecutionStatus
+from app.models.user import User
 from app.schemas.incident import (
     ActionExecutionResponse,
     ApprovalDecisionRequest,
@@ -90,17 +92,20 @@ def get_verification_service() -> VerificationService:
 async def create_incident(
     body: IncidentCreateRequest,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> IncidentResponse:
     """Open a new incident.
 
     This is the entry point of the whole pipeline - everything else
     (investigate, approve, timeline) operates on the incident_id returned
-    here.
+    here. created_by is always the authenticated caller, never a
+    client-supplied value, so incident ownership can't be forged.
     """
     incident = await persistence.create_incident(
         title=body.title,
         description=body.description,
         severity=body.severity,
+        created_by=current_user.id,
     )
     await persistence.add_incident_event(
         incident.id,
@@ -115,6 +120,7 @@ async def create_incident(
 @router.get("", response_model=list[IncidentResponse])
 async def list_incidents(
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> list[IncidentResponse]:
     """List all incidents, most recently created first."""
     incidents = await persistence.list_incidents()
@@ -125,6 +131,7 @@ async def list_incidents(
 async def get_incident_results(
     incident_id: str,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> IncidentResultsResponse:
     """Get the full investigation/response picture for a single incident.
 
@@ -160,6 +167,7 @@ async def get_incident_results(
 async def get_incident_timeline(
     incident_id: str,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> list[TimelineEntryResponse]:
     """Get an incident's append-only timeline, in chronological order."""
     incident = await persistence.get_incident(incident_id)
@@ -174,6 +182,7 @@ async def get_incident_timeline(
 async def get_incident_evidence(
     incident_id: str,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> list[EvidenceResponse]:
     """Get the raw evidence collected for an incident (logs, metrics, deployments).
 
@@ -197,6 +206,7 @@ async def investigate_incident(
     incident_id: str,
     body: InvestigateRequest,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
     graph: CompiledStateGraph = Depends(get_investigation_graph),
 ) -> InvestigateResponse:
     """Run the investigation graph for an incident and persist the result.
@@ -297,6 +307,7 @@ async def recommend_remediation(
     incident_id: str,
     body: RemediationCreateRequest,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> RemediationResponse:
     """Recommend a remediation for a diagnosis, and open its approval request.
 
@@ -339,6 +350,7 @@ async def recommend_remediation(
 async def list_approvals(
     incident_id: str,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> list[ApprovalResponse]:
     """List every approval request raised for an incident."""
     approvals = await persistence.list_approvals(incident_id)
@@ -351,11 +363,15 @@ async def decide_approval(
     approval_id: int,
     body: ApprovalDecisionRequest,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> ApprovalResponse:
     """Approve or reject a pending remediation.
 
     This is the human-in-the-loop gate: MEDIUM/HIGH risk remediations
     cannot execute until this endpoint records an APPROVED decision.
+    decided_by is always the authenticated caller - a client-supplied
+    decided_by in the request body would let anyone attribute an
+    approval to another user, so body.decided_by is ignored here.
     """
     approval = await persistence.get_approval(approval_id)
     if approval is None or approval.incident_id != incident_id:
@@ -366,7 +382,7 @@ async def decide_approval(
 
     try:
         decided = await persistence.decide_approval(
-            approval_id, approved=body.approved, decided_by=body.decided_by, reason=body.reason
+            approval_id, approved=body.approved, decided_by=current_user.id, reason=body.reason
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -392,6 +408,7 @@ async def execute_remediation(
     incident_id: str,
     remediation_id: int,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
 ) -> ActionExecutionResponse:
     """Execute (simulate) a remediation's recommended action.
 
@@ -444,6 +461,7 @@ async def verify_execution(
     execution_id: int,
     body: VerifyRequest,
     persistence: IncidentPersistenceService = Depends(get_persistence_service),
+    current_user: User = Depends(get_current_user),
     verification_service: VerificationService = Depends(get_verification_service),
 ) -> VerificationResponse:
     """Collect fresh telemetry and check whether the incident actually recovered.

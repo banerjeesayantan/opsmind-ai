@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, UTC
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.v1.auth import db_service as auth_db_service
 from app.api.v1.incidents import (
     get_investigation_graph,
     get_persistence_service,
@@ -111,6 +112,47 @@ class _FakeGraphWithRemediation(_FakeGraph):
         return final_state.model_copy(update={"remediation": remediation}).model_dump()
 
 
+def _register_and_authenticate(test_client: TestClient) -> dict:
+    """Register a real user through the actual /auth/register endpoint and
+    attach its bearer token to every subsequent request this client makes.
+
+    Incident routes now require Depends(get_current_user) (see
+    app.api.v1.incidents), so every incident-API test needs a real,
+    valid JWT - going through the genuine register endpoint (rather than
+    minting a token by hand) exercises the exact same auth path a real
+    frontend would use, instead of quietly bypassing it for
+    convenience.
+
+    The register endpoint is rate-limited per remote address
+    (settings.RATE_LIMIT_ENDPOINTS["register"]), and slowapi's in-memory
+    storage is process-wide, not per-test - since every test in this
+    module registers a fresh user from the same TestClient IP, the
+    limiter is reset first so one test's registration never gets
+    throttled by a previous test's.
+
+    Uses a fresh, unique email each call (rather than one fixed
+    address) so a test that legitimately registers more than one user
+    against the same database - e.g. a second real user acting on
+    someone else's incident - doesn't collide with "Email already
+    registered".
+    """
+    import uuid
+
+    from app.core.limiter import limiter as _limiter
+
+    _limiter.reset()
+
+    email = f"incident-tests-{uuid.uuid4().hex}@opsmind-tests.io"
+    response = test_client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "Str0ng!Passw0rd"},
+    )
+    assert response.status_code == 200, response.text
+    user = response.json()
+    test_client.headers.update({"Authorization": f"Bearer {user['token']['access_token']}"})
+    return user
+
+
 @pytest.fixture()
 def client(test_engine, monkeypatch):
     """A TestClient wired to the isolated test_engine and a fake investigation graph.
@@ -126,14 +168,20 @@ def client(test_engine, monkeypatch):
     that override matching correctly, and guards against anything that
     reaches incident_persistence_service directly rather than through
     Depends(get_persistence_service).
+
+    Also registers a real user and attaches its token as the default
+    Authorization header, since every incident route is now
+    authenticated - see _register_and_authenticate.
     """
     service = IncidentPersistenceService(engine=test_engine)
     monkeypatch.setattr(incident_persistence_service, "engine", test_engine)
+    monkeypatch.setattr(auth_db_service, "engine", test_engine)
     app.dependency_overrides[get_persistence_service] = lambda: service
     app.dependency_overrides[get_investigation_graph] = lambda: _FakeGraph()
     app.dependency_overrides[get_verification_service] = lambda: VerificationService()
 
     with TestClient(app) as test_client:
+        _register_and_authenticate(test_client)
         yield test_client
 
     app.dependency_overrides.clear()
@@ -150,11 +198,13 @@ def client_with_remediation(test_engine, monkeypatch):
     """
     service = IncidentPersistenceService(engine=test_engine)
     monkeypatch.setattr(incident_persistence_service, "engine", test_engine)
+    monkeypatch.setattr(auth_db_service, "engine", test_engine)
     app.dependency_overrides[get_persistence_service] = lambda: service
     app.dependency_overrides[get_investigation_graph] = lambda: _FakeGraphWithRemediation()
     app.dependency_overrides[get_verification_service] = lambda: VerificationService()
 
     with TestClient(app) as test_client:
+        _register_and_authenticate(test_client)
         yield test_client
 
     app.dependency_overrides.clear()
