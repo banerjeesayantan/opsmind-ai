@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import type { IncidentResponse } from "@/lib/types";
 import { formatDateTime } from "@/lib/format";
 import { SeverityBadge, StatusBadge } from "@/components/badges";
@@ -6,11 +7,9 @@ import { LifecycleStepper } from "@/components/LifecycleStepper";
 
 export function IncidentHeader({ incident }: { incident: IncidentResponse }) {
   return (
-    <div className="border-b border-border bg-surface px-8 py-6">
+    <div className="border-b border-border bg-surface px-5 py-5 sm:px-8 sm:py-6">
       <Link href="/incidents" className="mb-3 inline-flex items-center gap-1.5 text-sm text-ink-tertiary hover:text-ink">
-        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12.5 15 7.5 10l5-5" />
-        </svg>
+        <ArrowLeft className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
         Incidents
       </Link>
 

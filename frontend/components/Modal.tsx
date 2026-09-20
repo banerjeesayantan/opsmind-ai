@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
@@ -26,9 +27,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
           <h2 className="text-sm font-semibold text-ink">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-ink-tertiary hover:bg-surface-hover hover:text-ink">
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <path strokeLinecap="round" d="m5 5 10 10M15 5 5 15" />
-            </svg>
+            <X className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Activity, CheckCircle2, Clock, Flame, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button, Card, EmptyState, ErrorBanner, PageLoading, Skeleton } from "@/components/ui";
 import { IncidentRow } from "@/components/IncidentRow";
@@ -17,12 +18,32 @@ const OPEN_STATUSES: IncidentResponse["status"][] = [
   "verifying",
 ];
 
-function StatCard({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "warning" | "critical" }) {
-  const toneClass = tone === "warning" ? "text-severity-high" : tone === "critical" ? "text-severity-critical" : "text-ink";
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+  tone?: "default" | "warning" | "critical";
+}) {
+  const toneStyles: Record<string, { text: string; iconBg: string; iconText: string }> = {
+    default: { text: "text-ink", iconBg: "bg-surface-raised", iconText: "text-ink-secondary" },
+    warning: { text: "text-severity-high", iconBg: "bg-severity-high/10", iconText: "text-severity-high" },
+    critical: { text: "text-severity-critical", iconBg: "bg-severity-critical/10", iconText: "text-severity-critical" },
+  };
+  const s = toneStyles[tone] ?? toneStyles.default!;
   return (
     <Card className="px-5 py-4">
-      <p className="text-sm text-ink-tertiary">{label}</p>
-      <p className={`mt-1.5 text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-ink-tertiary">{label}</p>
+        <div className={`flex h-7 w-7 items-center justify-center rounded-md ${s.iconBg}`}>
+          <Icon className={`h-3.5 w-3.5 ${s.iconText}`} strokeWidth={2} />
+        </div>
+      </div>
+      <p className={`mt-2 text-2xl font-semibold tabular-nums ${s.text}`}>{value}</p>
     </Card>
   );
 }
@@ -32,8 +53,8 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-5xl px-8 py-8">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="mx-auto max-w-5xl px-5 py-6 sm:px-8 sm:py-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-ink">Dashboard</h1>
             <p className="mt-1 text-sm text-ink-tertiary">Your team&apos;s incident activity at a glance</p>
@@ -47,7 +68,7 @@ export default function DashboardPage() {
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-[76px]" />
+                <Skeleton key={i} className="h-[80px]" />
               ))}
             </div>
             <PageLoading label="Loading your incidents" />
@@ -64,9 +85,9 @@ export default function DashboardPage() {
 
 function DashboardContent({ incidents }: { incidents: IncidentResponse[] }) {
   const open = incidents.filter((i) => OPEN_STATUSES.includes(i.status));
+  const investigating = incidents.filter((i) => i.status === "investigating");
   const awaitingApproval = incidents.filter((i) => i.status === "awaiting_approval");
   const critical = incidents.filter((i) => i.severity === "critical" && OPEN_STATUSES.includes(i.status));
-  const resolved = incidents.filter((i) => i.status === "resolved");
 
   const recent = [...incidents]
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -89,25 +110,33 @@ function DashboardContent({ incidents }: { incidents: IncidentResponse[] }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard label="Open incidents" value={open.length} />
-        <StatCard label="Awaiting your approval" value={awaitingApproval.length} tone={awaitingApproval.length > 0 ? "warning" : "default"} />
-        <StatCard label="Critical & open" value={critical.length} tone={critical.length > 0 ? "critical" : "default"} />
-        <StatCard label="Resolved" value={resolved.length} />
+        <StatCard label="Open incidents" value={open.length} icon={Activity} />
+        <StatCard label="Critical & open" value={critical.length} icon={Flame} tone={critical.length > 0 ? "critical" : "default"} />
+        <StatCard label="Investigating" value={investigating.length} icon={Search} />
+        <StatCard
+          label="Awaiting approval"
+          value={awaitingApproval.length}
+          icon={Clock}
+          tone={awaitingApproval.length > 0 ? "warning" : "default"}
+        />
       </div>
 
-      {awaitingApproval.length > 0 && (
-        <Card>
-          <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Needs your approval</h2>
-              <p className="mt-0.5 text-sm text-ink-tertiary">Remediations blocked on a human decision</p>
-            </div>
+      <Card>
+        <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-ink">Needs your approval</h2>
+            <p className="mt-0.5 text-sm text-ink-tertiary">Remediations blocked on a human decision</p>
           </div>
-          {awaitingApproval.map((incident) => (
-            <IncidentRow key={incident.id} incident={incident} />
-          ))}
-        </Card>
-      )}
+        </div>
+        {awaitingApproval.length === 0 ? (
+          <div className="flex items-center gap-2.5 px-5 py-6">
+            <CheckCircle2 className="h-4 w-4 text-severity-low" strokeWidth={2} aria-hidden="true" />
+            <p className="text-sm text-ink-tertiary">Nothing is waiting on you right now.</p>
+          </div>
+        ) : (
+          awaitingApproval.map((incident) => <IncidentRow key={incident.id} incident={incident} />)
+        )}
+      </Card>
 
       <Card>
         <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">

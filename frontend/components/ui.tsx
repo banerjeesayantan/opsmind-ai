@@ -1,26 +1,33 @@
 "use client";
 
 import { ButtonHTMLAttributes, InputHTMLAttributes, LabelHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 
 // --- Button ------------------------------------------------------------------
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "danger" | "ghost";
+  /** Defaults to "md". "sm" is for dense contexts (table row actions, inline pipeline steps). */
+  size?: "sm" | "md";
   loading?: boolean;
 }
 
-export function Button({ variant = "secondary", loading, className = "", children, disabled, ...rest }: ButtonProps) {
+export function Button({ variant = "secondary", size = "md", loading, className = "", children, disabled, ...rest }: ButtonProps) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-50";
+    "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-50";
+  const sizes: Record<string, string> = {
+    sm: "px-2.5 py-1.5 text-xs",
+    md: "px-3.5 py-2 text-sm",
+  };
   const variants: Record<string, string> = {
-    primary: "bg-accent text-white hover:bg-accent-hover",
-    secondary: "bg-surface-raised text-ink border border-border hover:bg-surface-hover",
+    primary: "bg-accent text-white hover:bg-accent-hover active:bg-accent-active",
+    secondary: "bg-surface-raised text-ink border border-border hover:bg-surface-hover active:bg-surface-active",
     danger: "bg-severity-critical/90 text-white hover:bg-severity-critical",
     ghost: "text-ink-secondary hover:text-ink hover:bg-surface-hover",
   };
   return (
-    <button className={`${base} ${variants[variant]} ${className}`} disabled={disabled || loading} {...rest}>
-      {loading && <Spinner size={14} />}
+    <button className={`${base} ${sizes[size]} ${variants[variant]} ${className}`} disabled={disabled || loading} {...rest}>
+      {loading && <Spinner size={size === "sm" ? 12 : 14} />}
       {children}
     </button>
   );
@@ -56,7 +63,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink placeholder:text-ink-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
+      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink placeholder:text-ink-tertiary transition-colors focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
     />
   );
 }
@@ -65,7 +72,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
       {...props}
-      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink placeholder:text-ink-tertiary focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
+      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink placeholder:text-ink-tertiary transition-colors focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
     />
   );
 }
@@ -74,7 +81,7 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
+      className={`w-full rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-ink transition-colors focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50 ${props.className ?? ""}`}
     />
   );
 }
@@ -87,18 +94,7 @@ export function FieldError({ children }: { children?: ReactNode }) {
 // --- Spinner --------------------------------------------------------------------
 
 export function Spinner({ size = 20, className = "" }: { size?: number; className?: string }) {
-  return (
-    <svg
-      className={`animate-spin ${className}`}
-      style={{ width: size, height: size }}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
-      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    </svg>
-  );
+  return <Loader2 className={`animate-spin ${className}`} style={{ width: size, height: size }} aria-hidden="true" />;
 }
 
 // --- Page-level states ------------------------------------------------------------
@@ -116,20 +112,14 @@ export function ErrorBanner({ title = "Something went wrong", message, onRetry }
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border border-severity-critical/30 bg-severity-critical/10 px-4 py-3.5">
       <div className="flex gap-3">
-        <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-severity-critical" viewBox="0 0 20 20" fill="currentColor">
-          <path
-            fillRule="evenodd"
-            d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.63-1.516 2.63H3.72c-1.347 0-2.189-1.463-1.516-2.63L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-            clipRule="evenodd"
-          />
-        </svg>
+        <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-severity-critical" aria-hidden="true" />
         <div>
           <p className="text-sm font-medium text-ink">{title}</p>
           <p className="mt-0.5 text-sm text-ink-secondary">{message}</p>
         </div>
       </div>
       {onRetry && (
-        <Button variant="secondary" onClick={onRetry} className="flex-shrink-0">
+        <Button variant="secondary" size="sm" onClick={onRetry} className="flex-shrink-0">
           Try again
         </Button>
       )}
@@ -150,11 +140,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-14 text-center">
-      {icon ?? (
-        <svg className="h-8 w-8 text-ink-tertiary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
-        </svg>
-      )}
+      {icon ?? <Inbox className="h-7 w-7 text-ink-tertiary" strokeWidth={1.5} aria-hidden="true" />}
       <div>
         <p className="text-sm font-medium text-ink">{title}</p>
         <p className="mt-1 max-w-sm text-sm text-ink-tertiary">{message}</p>
