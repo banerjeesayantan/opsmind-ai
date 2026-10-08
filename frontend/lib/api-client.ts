@@ -55,11 +55,32 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 
 function messageFromBody(body: ApiErrorBody | null, fallback: string): string {
   if (!body) return fallback;
-  if (body.detail) return body.detail;
+  if (body.detail && !(body.errors && body.errors.length > 0)) return body.detail;
   if (body.errors && body.errors.length > 0) {
-    return body.errors.map((e) => `${e.field}: ${e.message}`).join("; ");
+    // Backend validation messages look like "Value error, Password must contain ...".
+    // Drop pydantic's boilerplate prefix, and only prefix the field name when the
+    // message doesn't already say what it's about.
+    return body.errors
+      .map((e) => {
+        const msg = e.message.replace(/^Value error,\s*/i, "");
+        return msg.toLowerCase().includes(e.field.toLowerCase()) ? msg : `${e.field}: ${msg}`;
+      })
+      .join("; ");
   }
-  return fallback;
+  return body.detail ?? fallback;
+}
+
+/**
+ * The backend reports a bad session in three different ways (see get_current_user in
+ * app/api/v1/auth.py): 401 for a missing/expired/invalid token, 422 "Invalid token format"
+ * for a malformed one, and 404 "User not found" for a valid token whose user no longer exists.
+ * All three mean the stored token is unusable and the user has to sign in again.
+ */
+function isInvalidSession(status: number, body: ApiErrorBody | null): boolean {
+  if (status === 401) return true;
+  if (status === 404 && body?.detail === "User not found") return true;
+  if (status === 422 && body?.detail === "Invalid token format") return true;
+  return false;
 }
 
 interface RequestOptions {
@@ -75,12 +96,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const { method = "GET", body, form = false, skipAuth = false } = options;
 
   const headers: Record<string, string> = {};
+  let sentToken = false;
   if (body !== undefined) {
     headers["Content-Type"] = form ? "application/x-www-form-urlencoded" : "application/json";
   }
   if (!skipAuth) {
     const token = getStoredToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+      sentToken = true;
+    }
   }
 
   let response: Response;
@@ -110,8 +135,11 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!response.ok) {
     const errorBody = parsed as ApiErrorBody | null;
-    if (response.status === 401 && !skipAuth) {
+    if (!skipAuth && (sentToken || response.status === 401) && isInvalidSession(response.status, errorBody)) {
       onUnauthorized?.();
+    }
+    if (response.status === 429) {
+      throw new ApiError(429, errorBody, "Too many requests. Wait a moment and try again.");
     }
     throw new ApiError(response.status, errorBody, messageFromBody(errorBody, `Request failed (${response.status})`));
   }

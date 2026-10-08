@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError } from "@/lib/api-client";
+import { Check, Circle } from "lucide-react";
 import { Button, ErrorBanner, Input, Label } from "@/components/ui";
-
-const MIN_PASSWORD_LENGTH = 8;
+import { PASSWORD_RULES, unmetPasswordRules } from "@/lib/password";
 
 export default function RegisterPage() {
   const { register, isAuthenticated } = useAuth();
@@ -27,8 +27,9 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
 
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+    const unmet = unmetPasswordRules(password);
+    if (unmet.length > 0) {
+      setError(`Password needs: ${unmet.map((r) => r.label.toLowerCase().replace(/\s*\(.*\)$/, "")).join(", ")}.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -85,11 +86,23 @@ export default function RegisterPage() {
               type="password"
               autoComplete="new-password"
               required
-              minLength={MIN_PASSWORD_LENGTH}
+              aria-describedby="password-rules"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 8 characters"
+              placeholder="Choose a strong password"
             />
+            <ul id="password-rules" className="mt-2 space-y-1">
+              {PASSWORD_RULES.map((rule) => {
+                const met = rule.test(password);
+                return (
+                  <li key={rule.id} className={`flex items-center gap-1.5 text-xs ${met ? "text-severity-low" : "text-ink-tertiary"}`}>
+                    {met ? <Check className="h-3 w-3" strokeWidth={3} aria-hidden="true" /> : <Circle className="h-3 w-3" aria-hidden="true" />}
+                    <span>{rule.label}</span>
+                    <span className="sr-only">{met ? "(met)" : "(not met yet)"}</span>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
 
           <div>

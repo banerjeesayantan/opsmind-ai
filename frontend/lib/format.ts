@@ -96,3 +96,17 @@ export function actionTypeLabel(actionType: string): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+/**
+ * The service an incident was opened for. The backend doesn't return it on the incident itself, but
+ * it records it in the metadata of the incident's first timeline event ("incident_created"), so we
+ * read it from there - real data, nothing assumed.
+ */
+export function serviceFromTimeline(entries: { event_type: string; event_metadata: Record<string, unknown> | null }[] | null): string | null {
+  if (!entries) return null;
+  for (const entry of entries) {
+    const service = entry.event_metadata?.["service"];
+    if (entry.event_type === "incident_created" && typeof service === "string" && service) return service;
+  }
+  return null;
+}

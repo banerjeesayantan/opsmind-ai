@@ -15,6 +15,7 @@ import { RemediationSection } from "@/components/incident/RemediationPipeline";
 import { TimelineSection } from "@/components/incident/Timeline";
 import { incidentsApi } from "@/lib/incidents-api";
 import { useAsync } from "@/lib/use-async";
+import { serviceFromTimeline } from "@/lib/format";
 
 type TabKey = "overview" | "investigation" | "evidence" | "remediation" | "timeline";
 
@@ -33,6 +34,8 @@ export default function IncidentDetailPage() {
     evidence.reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incidentId]);
+
+  const service = serviceFromTimeline(timeline.data);
 
   const tabs: TabItem[] = [
     { key: "overview", label: "Overview", icon: LayoutGrid },
@@ -58,7 +61,7 @@ export default function IncidentDetailPage() {
 
       {!results.loading && !results.error && results.data && (
         <>
-          <IncidentHeader incident={results.data.incident} />
+          <IncidentHeader incident={results.data.incident} service={service} />
 
           <div className="border-b border-border bg-surface px-5 sm:px-8">
             <div className="mx-auto max-w-3xl">
@@ -78,6 +81,7 @@ export default function IncidentDetailPage() {
                 incidentId={incidentId}
                 hypotheses={results.data.hypotheses}
                 diagnosis={results.data.diagnosis}
+                defaultService={service}
                 onInvestigated={reloadAll}
               />
             </TabPanel>

@@ -5,7 +5,7 @@ import { formatDateTime } from "@/lib/format";
 import { SeverityBadge, StatusBadge } from "@/components/badges";
 import { LifecycleStepper } from "@/components/LifecycleStepper";
 
-export function IncidentHeader({ incident }: { incident: IncidentResponse }) {
+export function IncidentHeader({ incident, service }: { incident: IncidentResponse; service?: string | null }) {
   return (
     <div className="border-b border-border bg-surface px-5 py-5 sm:px-8 sm:py-6">
       <Link href="/incidents" className="mb-3 inline-flex items-center gap-1.5 text-sm text-ink-tertiary hover:text-ink">
@@ -22,6 +22,14 @@ export function IncidentHeader({ incident }: { incident: IncidentResponse }) {
           </div>
           <div className="mt-1.5 flex items-center gap-3 text-sm text-ink-tertiary">
             <span className="font-mono">{incident.id}</span>
+            {service && (
+              <>
+                <span>&middot;</span>
+                <span>
+                  Service <span className="font-mono text-ink-secondary">{service}</span>
+                </span>
+              </>
+            )}
             <span>&middot;</span>
             <span>Opened {formatDateTime(incident.created_at)}</span>
             {incident.resolved_at && (

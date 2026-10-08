@@ -20,15 +20,21 @@ export function InvestigationSection({
   incidentId,
   hypotheses,
   diagnosis,
+  defaultService,
   onInvestigated,
 }: {
   incidentId: string;
   hypotheses: HypothesisResponse[];
   diagnosis: DiagnosisResponse | null;
+  /** Service the incident was opened for (from its creation timeline event), used to pre-fill the form. */
+  defaultService?: string | null;
   onInvestigated: () => void;
 }) {
   const initial = defaultWindow();
-  const [service, setService] = useState("");
+  // null = the user hasn't typed anything, so show the incident's own service once it's known.
+  const [typedService, setTypedService] = useState<string | null>(null);
+  const service = typedService ?? defaultService ?? "";
+  const setService = (value: string) => setTypedService(value);
   const [windowStart, setWindowStart] = useState(initial.start);
   const [windowEnd, setWindowEnd] = useState(initial.end);
   const [error, setError] = useState<string | null>(null);
