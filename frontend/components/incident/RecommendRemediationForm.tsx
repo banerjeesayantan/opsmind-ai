@@ -13,6 +13,18 @@ const ACTION_TYPES: { value: RemediationActionType; label: string }[] = [
   { value: "switch_feature_flag", label: "Switch feature flag" },
 ];
 
+// Required parameter keys per action. Mirrors the parameter models the backend's own planner enforces
+// (_RollbackParams, _RestartParams, _ScaleParams, _FeatureFlagParams in
+// app/investigation/nodes/remediation_planner.py). The manual-recommend endpoint itself accepts anything
+// (e.g. a rollback with no deployment_id returns 201), so without this a typo creates a remediation that
+// can't actually run.
+const REQUIRED_PARAMS: Record<RemediationActionType, string[]> = {
+  rollback_deployment: ["deployment_id"],
+  restart_service: ["service"],
+  scale_service: ["service", "target_replicas", "direction"],
+  switch_feature_flag: ["flag_name", "enabled"],
+};
+
 export function RecommendRemediationForm({
   incidentId,
   diagnosisId,
@@ -35,9 +47,16 @@ export function RecommendRemediationForm({
 
     let parameters: Record<string, unknown>;
     try {
-      parameters = parametersText.trim() ? JSON.parse(parametersText) : {};
+      const parsed: unknown = parametersText.trim() ? JSON.parse(parametersText) : {};
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+      parameters = parsed as Record<string, unknown>;
     } catch {
-      setError("Parameters must be valid JSON, e.g. {}");
+      setError('Parameters must be a JSON object, e.g. {"service": "checkout"}');
+      return;
+    }
+    const missing = REQUIRED_PARAMS[actionType].filter((key) => parameters[key] === undefined || parameters[key] === "");
+    if (missing.length > 0) {
+      setError(`${ACTION_TYPES.find((a) => a.value === actionType)?.label ?? actionType} needs parameters: ${missing.join(", ")}`);
       return;
     }
 
@@ -88,7 +107,7 @@ export function RecommendRemediationForm({
         />
       </div>
       <div>
-        <Label htmlFor="parameters">Parameters (JSON)</Label>
+        <Label htmlFor="parameters">Parameters (JSON) &mdash; required: {REQUIRED_PARAMS[actionType].join(", ")}</Label>
         <Textarea
           id="parameters"
           rows={2}

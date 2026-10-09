@@ -18,9 +18,20 @@ export function CreateIncidentModal({ onClose, onCreated }: { onClose: () => voi
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    // The backend accepts a whitespace-only title (201), so blank input is rejected here.
+    const cleanTitle = title.trim();
+    const cleanService = service.trim();
+    if (!cleanTitle) {
+      setError("Give the incident a title.");
+      return;
+    }
+    if (!cleanService) {
+      setError("Enter the service this incident affects.");
+      return;
+    }
     setLoading(true);
     try {
-      const incident = await incidentsApi.create({ title, service, severity, description });
+      const incident = await incidentsApi.create({ title: cleanTitle, service: cleanService, severity, description: description.trim() });
       onCreated(incident);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't create the incident. Try again.");

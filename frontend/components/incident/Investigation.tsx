@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import type { DiagnosisResponse, HypothesisResponse } from "@/lib/types";
+import type { DiagnosisResponse, HypothesisResponse, IncidentStatus } from "@/lib/types";
 import { formatConfidence, formatDateTime } from "@/lib/format";
 import { incidentsApi } from "@/lib/incidents-api";
 import { ApiError } from "@/lib/api-client";
@@ -20,12 +20,15 @@ export function InvestigationSection({
   incidentId,
   hypotheses,
   diagnosis,
+  incidentStatus,
   defaultService,
   onInvestigated,
 }: {
   incidentId: string;
   hypotheses: HypothesisResponse[];
   diagnosis: DiagnosisResponse | null;
+  /** Used to tell "never investigated" (status new) apart from "investigated, found nothing". */
+  incidentStatus: IncidentStatus;
   /** Service the incident was opened for (from its creation timeline event), used to pre-fill the form. */
   defaultService?: string | null;
   onInvestigated: () => void;
@@ -40,17 +43,35 @@ export function InvestigationSection({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const hasRun = hypotheses.length > 0 || diagnosis !== null;
+  // An investigation can legitimately finish with no hypotheses (the incident then becomes "unresolved"),
+  // so "has run" comes from the incident's own status, not from whether results exist.
+  const hasRun = incidentStatus !== "new";
+  const hasResults = hypotheses.length > 0 || diagnosis !== null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const start = new Date(windowStart);
+    const end = new Date(windowEnd);
+    // The backend doesn't validate the window (it returns 200 with a meaningless result), so check here.
+    if (!service.trim()) {
+      setError("Enter the service to investigate.");
+      return;
+    }
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      setError("Enter a valid start and end time.");
+      return;
+    }
+    if (end <= start) {
+      setError("The window end must be after the window start.");
+      return;
+    }
     setLoading(true);
     try {
       await incidentsApi.investigate(incidentId, {
-        service,
-        window_start: new Date(windowStart).toISOString(),
-        window_end: new Date(windowEnd).toISOString(),
+        service: service.trim(),
+        window_start: start.toISOString(),
+        window_end: end.toISOString(),
       });
       onInvestigated();
     } catch (err) {
@@ -89,6 +110,12 @@ export function InvestigationSection({
 
         {!hasRun && (
           <EmptyState title="No investigation run yet" message="Pick a service and time window above to collect evidence and generate hypotheses." />
+        )}
+        {hasRun && !hasResults && (
+          <EmptyState
+            title="The investigation found no supported hypothesis"
+            message="It finished without a candidate cause the evidence could support. Check the Evidence tab, or run it again with a different service or time window."
+          />
         )}
 
         {hypotheses.length > 0 && (

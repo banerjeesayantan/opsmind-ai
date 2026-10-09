@@ -15,6 +15,15 @@ import { ApprovalBadge, ExecutionBadge, RiskBadge } from "@/components/badges";
 import { Button, Card, CardHeader, EmptyState, ErrorBanner } from "@/components/ui";
 import { RecommendRemediationForm } from "./RecommendRemediationForm";
 
+/**
+ * A 409 (already decided / not approved yet) or 404 means this screen is showing stale state - e.g. the
+ * approval was decided from another tab. Show the backend's message AND refetch so the UI matches reality
+ * instead of leaving buttons on screen that can no longer work.
+ */
+function isStaleStateError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 409 || err.status === 404);
+}
+
 function latestBy<T>(items: T[], key: (item: T) => string): T | null {
   if (items.length === 0) return null;
   return [...items].sort((a, b) => new Date(key(b)).getTime() - new Date(key(a)).getTime())[0] ?? null;
@@ -148,6 +157,7 @@ function ApprovalStep({
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't record that decision.");
+      if (isStaleStateError(err)) onChanged();
     } finally {
       setLoading(null);
     }
@@ -207,6 +217,7 @@ function ExecutionStep({
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Execution failed.");
+      if (isStaleStateError(err)) onChanged();
     } finally {
       setLoading(false);
     }
@@ -260,6 +271,7 @@ function VerificationStep({
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Verification failed to run.");
+      if (isStaleStateError(err)) onChanged();
     } finally {
       setLoading(false);
     }

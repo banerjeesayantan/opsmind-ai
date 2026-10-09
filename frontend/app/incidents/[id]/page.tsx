@@ -81,6 +81,7 @@ export default function IncidentDetailPage() {
                 incidentId={incidentId}
                 hypotheses={results.data.hypotheses}
                 diagnosis={results.data.diagnosis}
+                incidentStatus={results.data.incident.status}
                 defaultService={service}
                 onInvestigated={reloadAll}
               />
