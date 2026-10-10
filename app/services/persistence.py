@@ -53,6 +53,18 @@ from app.core.metrics import (
 )
 
 
+VALID_TRANSITIONS: dict[IncidentStatus, set[IncidentStatus]] = {
+    IncidentStatus.NEW: {IncidentStatus.INVESTIGATING},
+    IncidentStatus.INVESTIGATING: {IncidentStatus.DIAGNOSED, IncidentStatus.UNRESOLVED},
+    IncidentStatus.DIAGNOSED: {IncidentStatus.AWAITING_APPROVAL, IncidentStatus.REMEDIATING, IncidentStatus.INVESTIGATING},
+    IncidentStatus.AWAITING_APPROVAL: {IncidentStatus.REMEDIATING, IncidentStatus.DIAGNOSED},
+    IncidentStatus.REMEDIATING: {IncidentStatus.VERIFYING, IncidentStatus.REMEDIATING, IncidentStatus.DIAGNOSED},
+    IncidentStatus.VERIFYING: {IncidentStatus.RESOLVED, IncidentStatus.INVESTIGATING},
+    IncidentStatus.RESOLVED: set(),
+    IncidentStatus.UNRESOLVED: {IncidentStatus.INVESTIGATING},
+}
+
+
 class IncidentPersistenceService:
     """Reads and writes the incident domain model rows.
 
@@ -122,29 +134,41 @@ class IncidentPersistenceService:
             statement = select(Incident).order_by(Incident.created_at.desc())
             return list(session.exec(statement).all())
 
-    async def update_incident_status(self, incident_id: str, status: IncidentStatus) -> Incident:
+    async def update_incident_status(
+        self, incident_id: str, status: IncidentStatus, force: bool = False
+    ) -> Incident:
         """Move an incident to a new lifecycle status.
 
         Sets resolved_at when transitioning into a terminal status
         (RESOLVED or UNRESOLVED); leaves it untouched otherwise.
+        Validates lifecycle state machine transitions unless force is True.
 
         Args:
             incident_id: The incident to update.
             status: The new status.
+            force: If True, bypass lifecycle transition validation.
 
         Returns:
             Incident: The updated incident row.
 
         Raises:
-            ValueError: If no incident exists with that ID.
+            ValueError: If no incident exists with that ID or if the transition is invalid.
         """
         with self._session() as session:
             incident = session.get(Incident, incident_id)
             if incident is None:
                 raise ValueError(f"No incident found with id {incident_id!r}")
+            if not force and status != incident.status:
+                allowed = VALID_TRANSITIONS.get(incident.status, set())
+                if status not in allowed:
+                    raise ValueError(
+                        f"Invalid status transition from {incident.status.value} to {status.value}"
+                    )
             incident.status = status
             if status in (IncidentStatus.RESOLVED, IncidentStatus.UNRESOLVED):
                 incident.resolved_at = datetime.now(UTC)
+            elif incident.resolved_at is not None and status not in (IncidentStatus.RESOLVED, IncidentStatus.UNRESOLVED):
+                incident.resolved_at = None
             session.add(incident)
             session.commit()
             session.refresh(incident)
@@ -186,10 +210,42 @@ class IncidentPersistenceService:
             )
             return list(session.exec(statement).all())
 
+    async def get_incident_service(self, incident_id: str) -> Optional[str]:
+        """Retrieve the service name associated with an incident.
+
+        Inspects timeline events (incident_created, investigation_started)
+        where service metadata is recorded, falling back to evidence rows
+        or incident title.
+        """
+        with self._session() as session:
+            events_stmt = (
+                select(IncidentEvent)
+                .where(IncidentEvent.incident_id == incident_id)
+                .order_by(IncidentEvent.occurred_at.asc())
+            )
+            events = list(session.exec(events_stmt).all())
+            for event in events:
+                if event.event_metadata and "service" in event.event_metadata:
+                    service = event.event_metadata["service"]
+                    if service:
+                        return str(service)
+
+            evidence_stmt = (
+                select(Evidence)
+                .where(Evidence.incident_id == incident_id)
+                .order_by(Evidence.occurred_at.asc())
+            )
+            evidence = session.exec(evidence_stmt).first()
+            if evidence and evidence.raw_data and "service" in evidence.raw_data:
+                return str(evidence.raw_data["service"])
+
+            incident = session.get(Incident, incident_id)
+            return incident.title if incident else None
+
     # -- Investigation result (Evidence / Hypothesis / Diagnosis) ----------
 
     async def persist_investigation_result(self, incident_id: str, state: InvestigationState) -> dict:
-        """Persist a completed investigation graph run's output.
+        """Persist a completed investigation graph run's output atomically.
 
         Maps the transient InvestigationState produced by
         app.investigation.graph into real DB rows: raw evidence, the
@@ -197,6 +253,9 @@ class IncidentPersistenceService:
         the final diagnosis if one could be reached. Advances the
         incident's status to DIAGNOSED on success, or UNRESOLVED if no
         diagnosis could be confirmed.
+
+        All entities and status updates are persisted in a single atomic
+        transaction. If an existing active diagnosis exists, it is deactivated.
 
         Args:
             incident_id: The incident this investigation covers.
@@ -219,7 +278,7 @@ class IncidentPersistenceService:
                         incident_id=incident_id,
                         source=EvidenceSource.LOG,
                         content=log.message,
-                        raw_data={"severity": log.severity, "metadata": log.metadata},
+                        raw_data={"severity": log.severity, "metadata": log.metadata, "service": log.service},
                         occurred_at=log.timestamp,
                     )
                     session.add(row)
@@ -234,7 +293,7 @@ class IncidentPersistenceService:
                         source=EvidenceSource.DEPLOYMENT_EVENT,
                         source_reference=deployment.deployment_id,
                         content=content,
-                        raw_data={"commit_sha": deployment.commit_sha, "environment": deployment.environment},
+                        raw_data={"commit_sha": deployment.commit_sha, "environment": deployment.environment, "service": deployment.service},
                         occurred_at=deployment.timestamp,
                     )
                     session.add(row)
@@ -249,7 +308,7 @@ class IncidentPersistenceService:
                         source=EvidenceSource.METRIC,
                         source_reference=metric.metric_name,
                         content=content,
-                        raw_data={"value": metric.value, "labels": metric.labels},
+                        raw_data={"value": metric.value, "labels": metric.labels, "service": metric.service},
                         occurred_at=metric.timestamp,
                     )
                     session.add(row)
@@ -265,7 +324,6 @@ class IncidentPersistenceService:
                         occurred_at=entry.timestamp,
                     )
                 )
-            session.commit()
 
             validated_statements = {h.statement for h in state.validated_hypotheses}
             hypothesis_ids: list[int] = []
@@ -299,19 +357,21 @@ class IncidentPersistenceService:
                 session.flush()
                 hypothesis_ids.append(row.id)
                 statement_to_id[candidate.statement] = row.id
-            session.commit()
 
             diagnosis_id: Optional[int] = None
             diagnosis: Optional[DiagnosisResult] = state.diagnosis
             if diagnosis is not None and diagnosis.probable_cause in statement_to_id:
-                supporting_ids = [
-                    citation_lookup[(c.content, c.timestamp)]
-                    for c in diagnosis.supporting_evidence
-                    if (c.content, c.timestamp) in citation_lookup
-                ]
-                # supporting_evidence_ids for the diagnosis is carried on the
-                # linked Hypothesis row already; Diagnosis itself just needs
-                # the finalized cause, confidence, and impact summary.
+                # Deactivate any previous active diagnosis for this incident
+                prev_diagnoses = session.exec(
+                    select(Diagnosis).where(
+                        Diagnosis.incident_id == incident_id,
+                        Diagnosis.is_active == True,  # noqa: E712
+                    )
+                ).all()
+                for prev in prev_diagnoses:
+                    prev.is_active = False
+                    session.add(prev)
+
                 diagnosis_row = Diagnosis(
                     incident_id=incident_id,
                     hypothesis_id=statement_to_id[diagnosis.probable_cause],
@@ -323,16 +383,21 @@ class IncidentPersistenceService:
                 session.add(diagnosis_row)
                 session.flush()
                 diagnosis_id = diagnosis_row.id
-                _ = supporting_ids  # already captured via the hypothesis's own supporting_evidence_ids
-                session.commit()
 
             incident = session.get(Incident, incident_id)
             if incident is not None:
-                incident.status = IncidentStatus.DIAGNOSED if diagnosis_id is not None else IncidentStatus.UNRESOLVED
+                new_status = IncidentStatus.DIAGNOSED if diagnosis_id is not None else IncidentStatus.UNRESOLVED
+                incident.status = new_status
+                if new_status in (IncidentStatus.RESOLVED, IncidentStatus.UNRESOLVED):
+                    incident.resolved_at = datetime.now(UTC)
+                elif incident.resolved_at is not None and new_status not in (IncidentStatus.RESOLVED, IncidentStatus.UNRESOLVED):
+                    incident.resolved_at = None
                 if diagnosis is not None and diagnosis.impact is not None:
                     incident.severity = diagnosis.impact.severity
                 session.add(incident)
-                session.commit()
+
+            # Single atomic commit for entire investigation result
+            session.commit()
 
             investigations_completed_total.labels(
                 outcome="diagnosed" if diagnosis_id is not None else "unresolved"
@@ -652,7 +717,7 @@ class IncidentPersistenceService:
             )
             return list(session.exec(statement).all())
 
-    async def get_evidence_bundle(self, incident_id: str, service: str) -> EvidenceBundle:
+    async def get_evidence_bundle(self, incident_id: str, service: Optional[str] = None) -> EvidenceBundle:
         """Reconstruct an EvidenceBundle from an incident's persisted Evidence rows.
 
         Used as the "before" baseline for Phase 5 verification, since the
@@ -662,6 +727,9 @@ class IncidentPersistenceService:
         originally observed.
         """
         from app.telemetry.schemas import DeploymentEvent, LogEntry, MetricPoint, TimeWindow
+
+        if not service:
+            service = await self.get_incident_service(incident_id) or "unknown"
 
         rows = await self.list_evidence(incident_id)
         if not rows:

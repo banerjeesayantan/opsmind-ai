@@ -149,9 +149,44 @@ def test_update_incident_status_sets_resolved_at_on_terminal_status(test_engine)
         incident = await service.create_incident(title="Test incident")
         assert incident.resolved_at is None
 
-        updated = await service.update_incident_status(incident.id, IncidentStatus.RESOLVED)
+        updated = await service.update_incident_status(incident.id, IncidentStatus.RESOLVED, force=True)
         assert updated.status == IncidentStatus.RESOLVED
         assert updated.resolved_at is not None
+
+    asyncio.run(run())
+
+
+def test_update_incident_status_validates_transitions(test_engine):
+    service = IncidentPersistenceService(engine=test_engine)
+
+    async def run():
+        incident = await service.create_incident(title="Lifecycle test incident")
+        assert incident.status == IncidentStatus.NEW
+
+        # Invalid jump from NEW -> RESOLVED
+        with pytest.raises(ValueError, match="Invalid status transition"):
+            await service.update_incident_status(incident.id, IncidentStatus.RESOLVED)
+
+        # Valid lifecycle progression: NEW -> INVESTIGATING -> DIAGNOSED -> REMEDIATING -> VERIFYING -> RESOLVED
+        i1 = await service.update_incident_status(incident.id, IncidentStatus.INVESTIGATING)
+        assert i1.status == IncidentStatus.INVESTIGATING
+
+        i2 = await service.update_incident_status(incident.id, IncidentStatus.DIAGNOSED)
+        assert i2.status == IncidentStatus.DIAGNOSED
+
+        i3 = await service.update_incident_status(incident.id, IncidentStatus.REMEDIATING)
+        assert i3.status == IncidentStatus.REMEDIATING
+
+        i4 = await service.update_incident_status(incident.id, IncidentStatus.VERIFYING)
+        assert i4.status == IncidentStatus.VERIFYING
+
+        i5 = await service.update_incident_status(incident.id, IncidentStatus.RESOLVED)
+        assert i5.status == IncidentStatus.RESOLVED
+        assert i5.resolved_at is not None
+
+        # RESOLVED is terminal; cannot transition out
+        with pytest.raises(ValueError, match="Invalid status transition"):
+            await service.update_incident_status(incident.id, IncidentStatus.INVESTIGATING)
 
     asyncio.run(run())
 
@@ -241,6 +276,79 @@ def test_persist_investigation_result_inconclusive_marks_incident_unresolved(tes
         assert result["diagnosis_id"] is None
         updated_incident = await service.get_incident(incident.id)
         assert updated_incident.status == IncidentStatus.UNRESOLVED
+
+    asyncio.run(run())
+
+
+def test_reinvestigation_deactivates_prior_diagnosis(test_engine):
+    service = IncidentPersistenceService(engine=test_engine)
+    state = _investigation_state_with_diagnosis()
+
+    async def run():
+        incident = await service.create_incident(title="Checkout latency spike")
+        first = await service.persist_investigation_result(incident.id, state)
+        first_diag_id = first["diagnosis_id"]
+
+        active_diag1 = await service.get_active_diagnosis(incident.id)
+        assert active_diag1 is not None
+        assert active_diag1.id == first_diag_id
+        assert active_diag1.is_active is True
+
+        # Second investigation
+        second = await service.persist_investigation_result(incident.id, state)
+        second_diag_id = second["diagnosis_id"]
+        assert second_diag_id != first_diag_id
+
+        # The active diagnosis must now be the second one
+        active_diag2 = await service.get_active_diagnosis(incident.id)
+        assert active_diag2 is not None
+        assert active_diag2.id == second_diag_id
+        assert active_diag2.is_active is True
+
+        # The first diagnosis must now be inactive
+        prior = await service.get_diagnosis(first_diag_id)
+        assert prior is not None
+        assert prior.is_active is False
+
+    asyncio.run(run())
+
+
+def test_persist_investigation_result_is_atomic_on_failure(test_engine, monkeypatch):
+    from contextlib import contextmanager
+    service = IncidentPersistenceService(engine=test_engine)
+    state = _investigation_state_with_diagnosis()
+
+    async def run():
+        incident = await service.create_incident(title="Checkout latency spike")
+
+        # Monkeypatch session.commit to simulate a database failure before commit completes
+        orig_session = service._session
+
+        @contextmanager
+        def failing_session():
+            with orig_session() as s:
+                def failing_commit():
+                    raise RuntimeError("Simulated DB crash during commit")
+                s.commit = failing_commit
+                yield s
+
+        monkeypatch.setattr(service, "_session", failing_session)
+
+        with pytest.raises(RuntimeError, match="Simulated DB crash during commit"):
+            await service.persist_investigation_result(incident.id, state)
+
+        # Restore normal session and verify nothing was persisted
+        monkeypatch.setattr(service, "_session", orig_session)
+
+        evidence = await service.list_evidence(incident.id)
+        hypotheses = await service.list_hypotheses(incident.id)
+        diag = await service.get_active_diagnosis(incident.id)
+        inc = await service.get_incident(incident.id)
+
+        assert len(evidence) == 0
+        assert len(hypotheses) == 0
+        assert diag is None
+        assert inc.status == IncidentStatus.NEW
 
     asyncio.run(run())
 

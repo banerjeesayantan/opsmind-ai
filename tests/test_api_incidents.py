@@ -640,4 +640,115 @@ def test_investigate_without_remediation_leaves_remediation_id_none(client):
     full = client.get(f"/api/v1/incidents/{created['id']}").json()
     assert full["remediations"] == []
     assert full["approvals"] == []
+
+
+def test_resolved_incident_rejects_further_mutations(client_with_remediation):
+    client = client_with_remediation
+    app.dependency_overrides[get_verification_service] = lambda: _AlwaysRecoveredVerificationService()
+
+    created = _create_incident(client)
+    investigation = _investigate(client, created["id"])
+    assert investigation["remediation_id"] is not None
+
+    approvals = client.get(f"/api/v1/incidents/{created['id']}/approvals").json()
+    client.post(
+        f"/api/v1/incidents/{created['id']}/approvals/{approvals[0]['id']}/decision",
+        json={"approved": True},
+    )
+
+    execution = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    ).json()
+
+    verification = client.post(
+        f"/api/v1/incidents/{created['id']}/executions/{execution['id']}/verify", json={}
+    ).json()
+    assert verification["recovered"] is True
+
+    # 1. Calling investigate on resolved incident -> 409
+    window_start = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
+    window_end = window_start + timedelta(minutes=15)
+    resp_investigate = client.post(
+        f"/api/v1/incidents/{created['id']}/investigate",
+        json={
+            "service": "checkout",
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+        },
+    )
+    assert resp_investigate.status_code == 409
+
+    # 2. Recommending remediation on resolved incident -> 409
+    resp_remediation = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations",
+        json={
+            "diagnosis_id": investigation["diagnosis_id"],
+            "action_type": "restart_service",
+            "parameters": {},
+            "rationale": "Try restarting",
+        },
+    )
+    assert resp_remediation.status_code == 409
+
+    # 3. Executing remediation on resolved incident -> 409
+    resp_execute = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    )
+    assert resp_execute.status_code == 409
+
+
+def test_cannot_reexecute_completed_remediation(client_with_remediation):
+    client = client_with_remediation
+    created = _create_incident(client)
+    investigation = _investigate(client, created["id"])
+    assert investigation["remediation_id"] is not None
+
+    approvals = client.get(f"/api/v1/incidents/{created['id']}/approvals").json()
+    client.post(
+        f"/api/v1/incidents/{created['id']}/approvals/{approvals[0]['id']}/decision",
+        json={"approved": True},
+    )
+
+    # First execution succeeds (simulated)
+    execution = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    )
+    assert execution.status_code == 201
+
+    # Second execution must be rejected with 409 Conflict
+    re_exec = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    )
+    assert re_exec.status_code == 409
+    assert "already been executed" in re_exec.text
+
+
+def test_cannot_verify_duplicate_execution(client_with_remediation):
+    client = client_with_remediation
+    created = _create_incident(client)
+    investigation = _investigate(client, created["id"])
+
+    approvals = client.get(f"/api/v1/incidents/{created['id']}/approvals").json()
+    client.post(
+        f"/api/v1/incidents/{created['id']}/approvals/{approvals[0]['id']}/decision",
+        json={"approved": True},
+    )
+
+    execution = client.post(
+        f"/api/v1/incidents/{created['id']}/remediations/{investigation['remediation_id']}/execute"
+    ).json()
+
+    # First verification
+    v1 = client.post(
+        f"/api/v1/incidents/{created['id']}/executions/{execution['id']}/verify", json={}
+    )
+    assert v1.status_code == 200
+
+    # Second verification of the same execution -> 409 Conflict
+    v2 = client.post(
+        f"/api/v1/incidents/{created['id']}/executions/{execution['id']}/verify", json={}
+    )
+    assert v2.status_code == 409
+    assert "already been verified" in v2.text
+
     

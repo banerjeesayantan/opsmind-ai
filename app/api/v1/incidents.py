@@ -25,7 +25,7 @@ from app.investigation.graph import build_investigation_graph
 from app.investigation.risk import classify_risk
 from app.investigation.schemas import InvestigationState
 from app.investigation.verification import VerificationService
-from app.models.incident_enums import ExecutionStatus
+from app.models.incident_enums import ExecutionStatus, IncidentStatus
 from app.models.user import User
 from app.schemas.incident import (
     ActionExecutionResponse,
@@ -220,7 +220,13 @@ async def investigate_incident(
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No incident found with id {incident_id!r}")
 
-    await persistence.update_incident_status(incident_id, incident.status)  # no-op touch; keeps status explicit
+    if incident.status == IncidentStatus.RESOLVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident is already resolved and cannot be investigated.",
+        )
+
+    await persistence.update_incident_status(incident_id, IncidentStatus.INVESTIGATING)
     await persistence.add_incident_event(
         incident_id, event_type="investigation_started", description=f"Investigating service '{body.service}'."
     )
@@ -230,8 +236,22 @@ async def investigate_incident(
         service=body.service,
         time_window=TimeWindow(start=body.window_start, end=body.window_end),
     )
-    result = await graph.ainvoke(initial_state)
-    final_state = InvestigationState.model_validate(result)
+    try:
+        result = await graph.ainvoke(initial_state)
+        final_state = InvestigationState.model_validate(result)
+    except Exception as exc:
+        logger.error("investigation_graph_failed", incident_id=incident_id, error=str(exc))
+        await persistence.add_incident_event(
+            incident_id,
+            event_type="investigation_failed",
+            description=f"Investigation failed: {str(exc)}",
+            event_metadata={"service": body.service, "error": str(exc)},
+        )
+        await persistence.update_incident_status(incident_id, IncidentStatus.UNRESOLVED)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Investigation failed: {str(exc)}",
+        ) from exc
 
     persisted = await persistence.persist_investigation_result(incident_id, final_state)
     updated_incident = await persistence.get_incident(incident_id)
@@ -319,6 +339,12 @@ async def recommend_remediation(
     incident = await persistence.get_incident(incident_id)
     if incident is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No incident found with id {incident_id!r}")
+
+    if incident.status == IncidentStatus.RESOLVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Incident is already resolved and cannot accept new remediations.",
+        )
 
     diagnosis = await persistence.get_diagnosis(body.diagnosis_id)
     if diagnosis is None or diagnosis.incident_id != incident_id:
@@ -419,6 +445,18 @@ async def execute_remediation(
     from app.investigation.action_executor import ControlledActionExecutor
     from app.models.incident_enums import ApprovalStatus
 
+    incident = await persistence.get_incident(incident_id)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No incident found with id {incident_id!r}",
+        )
+    if incident.status == IncidentStatus.RESOLVED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Incident {incident_id!r} is already resolved. Cannot execute remediations.",
+        )
+
     remediation = await persistence.get_remediation(remediation_id)
     if remediation is None or remediation.incident_id != incident_id:
         raise HTTPException(
@@ -433,6 +471,21 @@ async def execute_remediation(
             status_code=status.HTTP_409_CONFLICT,
             detail="This remediation has not been approved (or auto-approved) yet.",
         )
+
+    existing_executions = await persistence.list_action_executions(incident_id)
+    remediation_executions = [e for e in existing_executions if e.remediation_id == remediation_id]
+    if any(e.status in (ExecutionStatus.SUCCEEDED, ExecutionStatus.SIMULATED) for e in remediation_executions):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This remediation action has already been executed successfully.",
+        )
+    if any(e.status == ExecutionStatus.PENDING for e in remediation_executions):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An action execution for this remediation is already in progress.",
+        )
+
+    await persistence.update_incident_status(incident_id, IncidentStatus.REMEDIATING)
 
     execution = await persistence.create_action_execution(incident_id, remediation_id)
     outcome = await ControlledActionExecutor().execute(remediation)
@@ -478,8 +531,28 @@ async def verify_execution(
             detail=f"No action execution {execution_id!r} found for incident {incident_id!r}",
         )
 
+    if execution.status not in (ExecutionStatus.SUCCEEDED, ExecutionStatus.SIMULATED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot verify an action execution with status {execution.status.value!r}. Only succeeded or simulated executions can be verified.",
+        )
+
+    existing_verifications = await persistence.list_verifications(incident_id)
+    if any(v.action_execution_id == execution_id for v in existing_verifications):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Action execution has already been verified.",
+        )
+
     incident = await persistence.get_incident(incident_id)
-    before_evidence = await persistence.get_evidence_bundle(incident_id, service=incident.title)
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No incident found with id {incident_id!r}",
+        )
+
+    service_name = await persistence.get_incident_service(incident_id) or incident.title
+    before_evidence = await persistence.get_evidence_bundle(incident_id, service=service_name)
 
     if body.after_window_start and body.after_window_end:
         after_window = TimeWindow(start=body.after_window_start, end=body.after_window_end)
@@ -488,7 +561,7 @@ async def verify_execution(
         after_window = TimeWindow(start=now, end=now + timedelta(minutes=15))
 
     comparison = await verification_service.verify(
-        service=before_evidence.service or incident.title,
+        service=service_name,
         before_evidence=before_evidence,
         after_window=after_window,
     )
