@@ -174,8 +174,14 @@ walkthrough, including the deterministic risk rules and recovery criteria.
 
 ---
 
-## Observability
+## Observability & Telemetry Integration
 
+### Telemetry Evidence Collection
+During incident investigation (`POST /api/v1/incidents/{id}/investigate`), `TelemetryService` collects metrics, logs, and deployment events over the incident's time window:
+- **Default Sources:** Deterministic mock providers generating realistic metric spikes, error logs, and recent deployment events for reproducible local development and testing.
+- **Live Prometheus Integration:** `PrometheusMetricSource` (`app.telemetry.PrometheusMetricSource`) connects directly to Prometheus instances via `/api/v1/query_range`. Configured via `PROMETHEUS_URL=http://localhost:9090` (or injected into `TelemetryService.with_prometheus_metrics()`). If Prometheus is unreachable or returns non-200, it logs a warning and falls back gracefully to prevent pipeline failure.
+
+### Application Metrics
 Prometheus metrics are exposed at `/metrics`, including OpsMind-specific
 counters/histograms (prefixed `opsmind_`) alongside the generic HTTP/LLM
 metrics: `opsmind_investigations_completed_total`,

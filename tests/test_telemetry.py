@@ -222,3 +222,81 @@ def test_telemetry_service_narrower_window_returns_fewer_results():
     narrow = TimeWindow(start=_incident_window().start, end=_incident_window().start + timedelta(minutes=3))
     bundle = asyncio.run(service.collect_evidence("checkout", narrow))
     assert bundle.total_count < 9
+
+
+# --- PrometheusMetricSource --------------------------------------------------
+
+
+def test_prometheus_metric_source_parses_matrix_response():
+    """Validates that standard Prometheus query_range responses are mapped to MetricPoints."""
+    import httpx
+    from app.telemetry.prometheus_source import PrometheusMetricSource
+
+    mock_resp_data = {
+        "status": "success",
+        "data": {
+            "resultType": "matrix",
+            "result": [
+                {
+                    "metric": {
+                        "__name__": "http_requests_total",
+                        "service": "checkout",
+                        "status": "500",
+                    },
+                    "values": [
+                        [1788775200.0, "12.5"],
+                        [1788775260.0, "18.2"],
+                    ],
+                }
+            ],
+        },
+    }
+
+    class MockTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(200, json=mock_resp_data)
+
+    client = httpx.AsyncClient(transport=MockTransport())
+    source = PrometheusMetricSource(base_url="http://prom-test:9090", client=client)
+
+    tw = _incident_window()
+    points = asyncio.run(source.fetch("checkout", tw))
+
+    assert len(points) == 2
+    assert points[0].metric_name == "http_requests_total"
+    assert points[0].value == 12.5
+    assert points[0].service == "checkout"
+    assert points[0].labels["status"] == "500"
+    assert points[1].value == 18.2
+
+
+def test_prometheus_metric_source_handles_http_errors_gracefully():
+    """Prometheus 500/unreachable errors must return an empty list without crashing."""
+    import httpx
+    from app.telemetry.prometheus_source import PrometheusMetricSource
+
+    class ErrorTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(503, text="Service Unavailable")
+
+    client = httpx.AsyncClient(transport=ErrorTransport())
+    source = PrometheusMetricSource(base_url="http://prom-error:9090", client=client)
+
+    points = asyncio.run(source.fetch("checkout", _incident_window()))
+    assert points == []
+
+
+def test_prometheus_metric_source_handles_network_exceptions_gracefully():
+    """Network connection drop / timeout must return empty list safely."""
+    import httpx
+    from app.telemetry.prometheus_source import PrometheusMetricSource
+
+    class FaultyTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            raise httpx.ConnectError("Connection refused by host")
+
+    client = httpx.AsyncClient(transport=FaultyTransport())
+    source = PrometheusMetricSource(base_url="http://prom-dead:9090", client=client)
+
+    points = asyncio.run(source.fetch("checkout", _incident_window()))
+    assert points == []

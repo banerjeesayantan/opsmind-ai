@@ -42,7 +42,7 @@ This is a single LangGraph pipeline, run in one call:
 
 | Node | What it does | LLM call? |
 |---|---|---|
-| `evidence_collector` | Pulls logs/metrics/deployments for the service + time window via `app.telemetry.TelemetryService` (mock sources by default - a real Prometheus/Loki/GitHub adapter is a drop-in swap) | No |
+| `evidence_collector` | Pulls logs/metrics/deployments for the service + time window via `app.telemetry.TelemetryService`. Supports default mock telemetry sources for isolated testing and live telemetry via `PrometheusMetricSource` (`/api/v1/query_range` configurable via `PROMETHEUS_URL`). | No |
 | `timeline_builder` | Turns discrete evidence (logs, deployments) into a sorted `TimelineEntry` list | No |
 | `hypothesis_generator` | Proposes up to 3 candidate root causes, each citing timeline entries by index | Yes |
 | `evidence_validator` | Judges whether each hypothesis's cited evidence actually supports its specific claim (not just "evidence exists") | Yes |

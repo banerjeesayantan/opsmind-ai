@@ -1,6 +1,7 @@
 """Orchestrates the telemetry sources into a single evidence bundle for an incident."""
 
 import asyncio
+from typing import Optional
 
 from app.telemetry.interfaces import (
     DeploymentSource,
@@ -55,6 +56,17 @@ class TelemetryService:
         return cls(
             log_source=MockLogSource(),
             metric_source=MockMetricSource(),
+            deployment_source=MockDeploymentSource(),
+        )
+
+    @classmethod
+    def with_prometheus_metrics(cls, prometheus_base_url: Optional[str] = None) -> "TelemetryService":
+        """Build a TelemetryService wired with real Prometheus metrics and mock logs/deployments."""
+        from app.telemetry.prometheus_source import PrometheusMetricSource
+
+        return cls(
+            log_source=MockLogSource(),
+            metric_source=PrometheusMetricSource(base_url=prometheus_base_url),
             deployment_source=MockDeploymentSource(),
         )
 
