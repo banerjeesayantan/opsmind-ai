@@ -1,7 +1,7 @@
 # OpsMind AI — Frontend
 
 Next.js 15 (App Router) + React 19 + TypeScript client for the OpsMind AI
-incident investigation and response platform. Talks only to the OpsMind
+incident investigation and response platform. Talks only to the OpsMind AI
 FastAPI backend under `../app` — never to Groq/OpenAI or any other LLM
 provider directly.
 

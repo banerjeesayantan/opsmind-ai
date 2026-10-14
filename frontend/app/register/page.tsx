@@ -58,7 +58,7 @@ export default function RegisterPage() {
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">O</div>
           <div>
-            <h1 className="text-lg font-semibold text-ink">Create your OpsMind account</h1>
+            <h1 className="text-lg font-semibold text-ink">Create your OpsMind AI account</h1>
             <p className="mt-1 text-sm text-ink-tertiary">Start investigating incidents with AI assistance</p>
           </div>
         </div>

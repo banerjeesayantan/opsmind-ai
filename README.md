@@ -2,7 +2,7 @@
 
 **AI-powered incident investigation and response platform.**
 
-OpsMind takes an incident from "something is wrong" to "here's what happened,
+OpsMind AI takes an incident from "something is wrong" to "here's what happened,
 here's the fix, and here's proof it worked" - automatically investigating,
 diagnosing, recommending a remediation, gating risky actions behind human
 approval, executing the fix, and verifying recovery.

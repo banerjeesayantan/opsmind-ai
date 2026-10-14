@@ -1,5 +1,5 @@
 /**
- * A single, thin wrapper around fetch for talking to the OpsMind FastAPI
+ * A single, thin wrapper around fetch for talking to the OpsMind AI FastAPI
  * backend. Every request in the app goes through here - the browser never
  * calls Groq/OpenAI or any other LLM provider directly, and no LLM
  * provider key is ever read, stored, or referenced in frontend code.
@@ -116,7 +116,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       body: body === undefined ? undefined : form ? (body as string) : JSON.stringify(body),
     });
   } catch {
-    throw new ApiError(0, null, "Could not reach the OpsMind API. Check your connection and try again.");
+    throw new ApiError(0, null, "Could not reach the OpsMind AI API. Check your connection and try again.");
   }
 
   if (response.status === 204) {

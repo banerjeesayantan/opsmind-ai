@@ -46,7 +46,7 @@ function LoginForm() {
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-sm font-bold text-white">O</div>
           <div>
-            <h1 className="text-lg font-semibold text-ink">Sign in to OpsMind</h1>
+            <h1 className="text-lg font-semibold text-ink">Sign in to OpsMind AI</h1>
             <p className="mt-1 text-sm text-ink-tertiary">Investigate and resolve incidents faster</p>
           </div>
         </div>
@@ -92,7 +92,7 @@ function LoginForm() {
         </form>
 
         <p className="mt-5 text-center text-sm text-ink-tertiary">
-          New to OpsMind?{" "}
+          New to OpsMind AI?{" "}
           <Link href="/register" className="font-medium text-accent hover:text-accent-hover">
             Create an account
           </Link>

@@ -1,6 +1,6 @@
 # Incident Flow
 
-This document walks through OpsMind's full pipeline, stage by stage, and
+This document walks through OpsMind AI's full pipeline, stage by stage, and
 maps each stage to the code that implements it and the API endpoint that
 drives it.
 

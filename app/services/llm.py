@@ -77,7 +77,7 @@ def _build_llm_registry() -> List[Dict[str, Any]]:
     """
     if not settings.GROQ_API_KEY:
         raise RuntimeError(
-            "GROQ_API_KEY is not set. OpsMind's $0 default LLM provider is "
+            "GROQ_API_KEY is not set. OpsMind AI's $0 default LLM provider is "
             "Groq's free tier - get a free API key (no credit card required) "
             "at https://console.groq.com/keys and set GROQ_API_KEY in your "
             ".env file."

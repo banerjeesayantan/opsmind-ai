@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-surface px-4 md:hidden">
         <div className="flex items-center gap-2">
           <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-xs font-bold text-white">O</div>
-          <span className="text-sm font-semibold tracking-tight text-ink">OpsMind</span>
+          <span className="text-sm font-semibold tracking-tight text-ink">OpsMind AI</span>
         </div>
         <button
           onClick={() => setMobileNavOpen((v) => !v)}
@@ -75,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <div className="hidden h-14 items-center gap-2 border-b border-border px-5 md:flex">
           <div className="flex h-6 w-6 items-center justify-center rounded bg-accent text-xs font-bold text-white">O</div>
-          <span className="text-sm font-semibold tracking-tight text-ink">OpsMind</span>
+          <span className="text-sm font-semibold tracking-tight text-ink">OpsMind AI</span>
         </div>
         <div className="h-14 flex-shrink-0 md:hidden" aria-hidden="true" />
 
