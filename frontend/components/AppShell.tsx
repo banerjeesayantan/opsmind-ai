@@ -3,16 +3,16 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { AlertTriangle, LayoutDashboard, LogOut, Menu, X } from "lucide-react";
+import { AlertTriangle, BarChart3, DollarSign, LayoutDashboard, LogOut, Menu, Terminal, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { PageLoading } from "./ui";
 
-// Nav is intentionally limited to routes that exist and are wired to a
-// real backend feature - no "Reports"/"Settings" placeholders for
-// functionality the API doesn't have yet.
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/incidents", label: "Incidents", icon: AlertTriangle },
+  { href: "/cost-usage", label: "Cost & Usage", icon: DollarSign },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/setup", label: "Setup", icon: Terminal },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

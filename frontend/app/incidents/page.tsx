@@ -83,6 +83,56 @@ function IncidentsListContent() {
         </div>
 
         {incidents && incidents.length > 0 && (
+          <>
+            <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("all")}
+              className={`rounded-md border p-3 text-left transition-colors ${
+                statusFilter === "all" ? "border-accent bg-accent/10" : "border-border bg-surface hover:bg-surface-hover"
+              }`}
+            >
+              <div className="text-xs text-ink-tertiary">All Incidents</div>
+              <div className="text-xl font-mono font-bold text-ink mt-0.5">{incidents.length}</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("investigating")}
+              className={`rounded-md border p-3 text-left transition-colors ${
+                statusFilter === "investigating" ? "border-accent bg-accent/10" : "border-border bg-surface hover:bg-surface-hover"
+              }`}
+            >
+              <div className="text-xs text-accent">Investigating</div>
+              <div className="text-xl font-mono font-bold text-accent mt-0.5">
+                {incidents.filter((i) => i.status === "investigating").length}
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("awaiting_approval")}
+              className={`rounded-md border p-3 text-left transition-colors ${
+                statusFilter === "awaiting_approval" ? "border-severity-high bg-severity-high/10" : "border-border bg-surface hover:bg-surface-hover"
+              }`}
+            >
+              <div className="text-xs text-severity-high">Awaiting Approval</div>
+              <div className="text-xl font-mono font-bold text-severity-high mt-0.5">
+                {incidents.filter((i) => i.status === "awaiting_approval").length}
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("resolved")}
+              className={`rounded-md border p-3 text-left transition-colors ${
+                statusFilter === "resolved" ? "border-severity-low bg-severity-low/10" : "border-border bg-surface hover:bg-surface-hover"
+              }`}
+            >
+              <div className="text-xs text-severity-low">Resolved</div>
+              <div className="text-xl font-mono font-bold text-severity-low mt-0.5">
+                {incidents.filter((i) => i.status === "resolved").length}
+              </div>
+            </button>
+          </div>
+
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative flex-1 sm:max-w-xs">
               <Search
@@ -133,7 +183,8 @@ function IncidentsListContent() {
               )}
             </div>
           </div>
-        )}
+        </>
+      )}
 
         {loading && <IncidentListSkeleton />}
         {!loading && error && <ErrorBanner message={error} onRetry={reload} />}
